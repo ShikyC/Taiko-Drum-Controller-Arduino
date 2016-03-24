@@ -22,15 +22,14 @@
 #define HEAVY_THRES 5000000
 
 #include <Keyboard.h>
+#include "cache.h"
 
 int channelSample [CHANNELS];
 int lastChannelSample [CHANNELS];
-int sampleCache [CHANNELS][SAMPLE_CACHE_LENGTH];
-short int sampleCacheIndex [CHANNELS];
+Cache<int,SAMPLE_CACHE_LENGTH> sampleCache [CHANNELS];
 
 long int power [CHANNELS];
-long int powerCache [CHANNELS][POWER_CACHE_LENGTH];
-short int powerCacheIndex [CHANNELS];
+Cache<long int,POWER_CACHE_LENGTH> powerCache [CHANNELS];
 
 bool triggered [CHANNELS];
 
@@ -39,14 +38,6 @@ void setup() {
   Keyboard.begin ();
   analogReference (DEFAULT);
   for (short int i = 0; i < CHANNELS; i++) {
-    for (short int j = 0; j < SAMPLE_CACHE_LENGTH; j++) {
-      sampleCache [i][j] = 0;
-    }
-    sampleCacheIndex [i] = SAMPLE_CACHE_LENGTH - 1; 
-    for (short int j = 0; j < POWER_CACHE_LENGTH; j++) {
-      powerCache [i][j] = 0;
-    }
-    powerCacheIndex [i] = POWER_CACHE_LENGTH - 1; 
     power [i] = 0;
     lastChannelSample [i] = 0;
     triggered [i] = false;
@@ -63,28 +54,25 @@ void loop() {
 
   for (short int i = 0; i < CHANNELS; i++) {
 
-    sampleCacheIndex [i] = (sampleCacheIndex [i] + 1) % SAMPLE_CACHE_LENGTH;
-    
-    sampleCache [i][sampleCacheIndex [i]] = channelSample [i] - lastChannelSample [i];
+    sampleCache [i].put(channelSample [i] - lastChannelSample [i]);
     
     long int tempInt;
-    tempInt = sampleCache [i][(sampleCacheIndex [i] + 1) % SAMPLE_CACHE_LENGTH];
+    tempInt = sampleCache [i].get(1);
     power [i] -= tempInt * tempInt;
-    tempInt = sampleCache [i][sampleCacheIndex [i]];
+    tempInt = sampleCache [i].get();
     power [i] += tempInt * tempInt;
         
     if (power [i] < LIGHT_THRES) {
       power [i] = 0;
     }
     
-    powerCacheIndex [i] = (powerCacheIndex [i] + 1 ) % POWER_CACHE_LENGTH;
-    powerCache [i][powerCacheIndex [i]] = power [i];
+    powerCache [i].put(power [i]);
 
     lastChannelSample [i] = channelSample [i];
 
     for (short int j = 0; j < POWER_CACHE_LENGTH - 1; j++){
       if (!triggered) {
-        if (powerCache [i][(powerCacheIndex [i] + j + 1) % POWER_CACHE_LENGTH] > powerCache [i][(powerCacheIndex [i] + j) % POWER_CACHE_LENGTH] || j != POWER_CACHE_LENGTH - 2) {
+        if (powerCache [i].get(j + 1) > powerCache [i].get(j) || j != POWER_CACHE_LENGTH - 2) {
           break;
         } else {
 #if MODE_JIRO
