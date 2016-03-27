@@ -85,7 +85,7 @@ void loop() {
         triggered [i] = false;
       }
       
-      if (!triggered) {
+      if (!triggered [i]) {
         if (powerCache [i].get (j + 1) >= powerCache [i].get (j) || j != POWER_CACHE_LENGTH - 2) {
           break;
         } else {
