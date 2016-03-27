@@ -21,6 +21,11 @@
 
 #include <Keyboard.h>
 #include "cache.h"
+#include "limits.h"
+
+#if MODE_JIRO
+#define HEAVY_THRES LONG_MAX
+#endif
 
 int channelSample [CHANNELS];
 int lastChannelSample [CHANNELS];
@@ -31,9 +36,9 @@ Cache <long int, POWER_CACHE_LENGTH> powerCache [CHANNELS];
 
 bool triggered [CHANNELS];
 
-#if MODE_DEBUG
-long int lastTime;
-#endif
+int pins[] = { A0, A1, A2, A3 };  // L don, R don, L kat, R kat
+char lightKeys[] = { 'g', 'h', 'f', 'j' };
+char heavyKeys[] = { 't', 'y', 'r', 'u' };
 
 void setup() {
   Serial.begin (9600);
@@ -44,25 +49,27 @@ void setup() {
     lastChannelSample [i] = 0;
     triggered [i] = false;
   }
-#if MODE_DEBUG
-lastTime = 0;
-#endif
 }
 
 void loop() {
 
-  channelSample[0] = analogRead (A0);  // L don
-  channelSample[1] = analogRead (A1);  // R don
-  channelSample[2] = analogRead (A2);  // L kat
-  channelSample[3] = analogRead (A3);  // R kat
-
 #if MODE_DEBUG
-  Serial.print (micros () - lastTime);
-  lastTime = micros ();
-  Serial.print ("\t");
+  long int sampleLastTime = 0;
+  long int calcLastTime = 0;
 #endif
   
   for (short int i = 0; i < CHANNELS; i++) {
+
+#if MODE_DEBUG
+    long int lastTime = micros();
+#endif
+    
+    channelSample[i] = analogRead (pins[i]);
+    
+#if MODE_DEBUG
+    sampleLastTime += micros () - lastTime;
+    lastTime = micros();
+#endif
     
     sampleCache [i].put (channelSample [i] - lastChannelSample [i]);
     
@@ -79,47 +86,29 @@ void loop() {
     powerCache [i].put (power [i]);
     lastChannelSample [i] = channelSample [i];
     
+    if (powerCache [i].get (1) == 0) {
+      triggered [i] = false;
+    }
+
+    bool isDescending = true;
     for (short int j = 0; j < POWER_CACHE_LENGTH - 1; j++){
-      
-      if (powerCache [i].get (j) == 0) {
-        triggered [i] = false;
+      if (!triggered [i] && (powerCache [i].get (j - 1) > powerCache [i].get (j))) {
+        isDescending = false;
+        break;
       }
-      
-      if (!triggered [i]) {
-        if (powerCache [i].get (j + 1) >= powerCache [i].get (j) || j != POWER_CACHE_LENGTH - 2) {
-          break;
-        } else {
-#if MODE_JIRO
-          if (power [i] >= LIGHT_THRES) {
-            triggered [i] = true;
-            switch (i) {
-              case 0: Keyboard.print ('g'); break;
-              case 1: Keyboard.print ('h'); break;
-              case 2: Keyboard.print ('f'); break;
-              case 3: Keyboard.print ('j'); break;
-            }
-          }
-#else
-          if (power [i] >= HEAVY_THRES) {
-            triggered [i] = true;
-            switch (i) {
-              case 0: Keyboard.print ('t'); break;
-              case 1: Keyboard.print ('y'); break;
-              case 2: Keyboard.print ('r'); break;
-              case 3: Keyboard.print ('u'); break;
-            }
-          } else if (power [i] >= LIGHT_THRES) {
-            triggered [i] = true;
-            switch (i) {
-              case 0: Keyboard.print ('g'); break;
-              case 1: Keyboard.print ('h'); break;
-              case 2: Keyboard.print ('f'); break;
-              case 3: Keyboard.print ('j'); break;
-            }
-          }
+    }
+    if (isDescending) {
+      if (power [i] >= HEAVY_THRES) {
+        triggered [i] = true;
+        Keyboard.print (heavyKeys [i]);
+      } else if (power [i] >= LIGHT_THRES) {
+        triggered [i] = true;
+        Keyboard.print (lightKeys [i]);
+      }
+
+#if MODE_DEBUG
+    calcLastTime += micros () - lastTime;
 #endif
-        }
-      }
     }
     
 #if MODE_DEBUG
@@ -131,8 +120,9 @@ void loop() {
   }
 
 #if MODE_DEBUG
-  Serial.print (micros () - lastTime);
-  lastTime = micros ();
+  Serial.print(sampleLastTime);
+  Serial.print('\t');
+  Serial.print(calcLastTime);
   Serial.println ("");
 #endif
 
