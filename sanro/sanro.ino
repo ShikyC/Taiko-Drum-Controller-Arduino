@@ -3,25 +3,26 @@
  *                Taiko Sanro - Arduino                        *
  *   Support Arduino models with ATmega32u4 microprocessors    *
  *                                                             *
- *                     Shiky Chang                             *
- *                zhangxunpx@gmail.com                         *
+ *          Shiky Chang                    Chris               *
+ *     zhangxunpx@gmail.com          wisaly@gmail.com          *
  *                                                             *
  ***************************************************************/
 
 #define MODE_JIRO 1
 #define MODE_DEBUG 1
+#define MODE_DEBUG_SHOW_TIME 0
 
 #define CHANNELS 4
 
-#define SAMPLE_CACHE_LENGTH 50
+#define SAMPLE_CACHE_LENGTH 15
 #define POWER_CACHE_LENGTH 3
 
-#define LIGHT_THRES 0
-#define HEAVY_THRES 70000
+#define LIGHT_THRES 500
+#define HEAVY_THRES 1000
 
+#include <limits.h>
 #include <Keyboard.h>
 #include "cache.h"
-#include "limits.h"
 
 #if MODE_JIRO
 #define HEAVY_THRES LONG_MAX
@@ -36,9 +37,9 @@ Cache <long int, POWER_CACHE_LENGTH> powerCache [CHANNELS];
 
 bool triggered [CHANNELS];
 
-int pins[] = { A0, A1, A2, A3 };  // L don, R don, L kat, R kat
-char lightKeys[] = { 'g', 'h', 'f', 'j' };
-char heavyKeys[] = { 't', 'y', 'r', 'u' };
+int pins[] = {A0, A1, A2, A3};  // L don, R don, L kat, R kat
+char lightKeys[] = {'g', 'h', 'f', 'j'};
+char heavyKeys[] = {'t', 'y', 'r', 'u'};
 
 void setup() {
   Serial.begin (9600);
@@ -100,10 +101,14 @@ void loop() {
     if (isDescending) {
       if (power [i] >= HEAVY_THRES) {
         triggered [i] = true;
+#if !MODE_DEBUG
         Keyboard.print (heavyKeys [i]);
+#endif
       } else if (power [i] >= LIGHT_THRES) {
         triggered [i] = true;
+#if !MODE_DEBUG
         Keyboard.print (lightKeys [i]);
+#endif
       }
 
 #if MODE_DEBUG
@@ -120,11 +125,19 @@ void loop() {
   }
 
 #if MODE_DEBUG
-  Serial.print(sampleLastTime);
-  Serial.print('\t');
-  Serial.print(calcLastTime);
+// Damn Arduino plotter, the Y axis scale changes much 
+// too frequently! Use these 5000 and 0 values to "lock" 
+// the plotter.
+  Serial.print (5000);
+  Serial.print ("\t");
+  Serial.print (0);
+  Serial.print ("\t");
+#if MODE_DEBUG_SHOW_TIME
+  Serial.print (sampleLastTime);
+  Serial.print ('\t');
+  Serial.print (calcLastTime);
+#endif
   Serial.println ("");
 #endif
 
 }
-

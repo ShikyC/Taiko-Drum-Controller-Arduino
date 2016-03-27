@@ -32,8 +32,8 @@ Cache <T, L>::Cache () {
 
 template <class T, int L>
 void Cache <T, L>::put (T value) {
-  data_ [current_] = value;
   current_ = (current_ + 1) % L;
+  data_ [current_] = value;
 }
 
 template <class T, int L>
