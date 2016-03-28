@@ -9,16 +9,15 @@
  ***************************************************************/
 
 #define MODE_JIRO 1
-#define MODE_DEBUG 1
-#define MODE_DEBUG_SHOW_TIME 0
+#define MODE_DEBUG 0
 
 #define CHANNELS 4
 
-#define SAMPLE_CACHE_LENGTH 15
+#define SAMPLE_CACHE_LENGTH 12
 #define POWER_CACHE_LENGTH 3
 
-#define LIGHT_THRES 500
-#define HEAVY_THRES 1000
+#define LIGHT_THRES 5000
+#define HEAVY_THRES 20000
 
 #include <limits.h>
 #include <Keyboard.h>
@@ -27,6 +26,8 @@
 #if MODE_JIRO
 #define HEAVY_THRES LONG_MAX
 #endif
+
+unsigned long int lastTime;
 
 int channelSample [CHANNELS];
 int lastChannelSample [CHANNELS];
@@ -50,28 +51,14 @@ void setup() {
     lastChannelSample [i] = 0;
     triggered [i] = false;
   }
+  lastTime = 0;
 }
 
 void loop() {
-
-#if MODE_DEBUG
-  long int sampleLastTime = 0;
-  long int calcLastTime = 0;
-#endif
   
   for (short int i = 0; i < CHANNELS; i++) {
-
-#if MODE_DEBUG
-    long int lastTime = micros();
-#endif
     
-    channelSample[i] = analogRead (pins[i]);
-    
-#if MODE_DEBUG
-    sampleLastTime += micros () - lastTime;
-    lastTime = micros();
-#endif
-    
+    channelSample[i] = analogRead (pins [i]);
     sampleCache [i].put (channelSample [i] - lastChannelSample [i]);
     
     long int tempInt;
@@ -79,44 +66,31 @@ void loop() {
     power [i] -= tempInt * tempInt;
     tempInt = sampleCache [i].get ();
     power [i] += tempInt * tempInt;
-    
     if (power [i] < LIGHT_THRES) {
       power [i] = 0;
     }
     
     powerCache [i].put (power [i]);
     lastChannelSample [i] = channelSample [i];
-    
     if (powerCache [i].get (1) == 0) {
       triggered [i] = false;
     }
 
-    bool isDescending = true;
-    for (short int j = 0; j < POWER_CACHE_LENGTH - 1; j++){
-      if (!triggered [i] && (powerCache [i].get (j - 1) > powerCache [i].get (j))) {
-        isDescending = false;
-        break;
+    if (!triggered [i]) {
+      for (short int j = 0; j < POWER_CACHE_LENGTH - 1; j++) {
+        if (powerCache [i].get (j - 1) >= powerCache [i].get (j)) {
+          break;
+        } else if (powerCache [i].get (1) >= HEAVY_THRES) {
+          triggered [i] = true;
+          Keyboard.print (heavyKeys [i]);
+        } else if (powerCache [i].get (1) >= LIGHT_THRES) {
+          triggered [i] = true;
+          Keyboard.print (lightKeys [i]);
+        }
       }
-    }
-    if (isDescending) {
-      if (power [i] >= HEAVY_THRES) {
-        triggered [i] = true;
-#if !MODE_DEBUG
-        Keyboard.print (heavyKeys [i]);
-#endif
-      } else if (power [i] >= LIGHT_THRES) {
-        triggered [i] = true;
-#if !MODE_DEBUG
-        Keyboard.print (lightKeys [i]);
-#endif
-      }
-
-#if MODE_DEBUG
-    calcLastTime += micros () - lastTime;
-#endif
     }
     
-#if MODE_DEBUG
+#if MODE_DEBUGjj
     Serial.print (power [i]);
     Serial.print ("\t");
 #endif
@@ -125,19 +99,19 @@ void loop() {
   }
 
 #if MODE_DEBUG
-// Damn Arduino plotter, the Y axis scale changes much 
-// too frequently! Use these 5000 and 0 values to "lock" 
-// the plotter.
-  Serial.print (5000);
+// Damn Arduino plotter, the Y axis scale changes too frequently! Use these values to "lock" the plotter's scale.
+  Serial.print (50000);
   Serial.print ("\t");
   Serial.print (0);
   Serial.print ("\t");
-#if MODE_DEBUG_SHOW_TIME
-  Serial.print (sampleLastTime);
-  Serial.print ('\t');
-  Serial.print (calcLastTime);
-#endif
+
   Serial.println ("");
 #endif
 
+// Force the sample frequency to be less than 1000Hz
+  unsigned int frameTime = micros () - lastTime;
+  lastTime = micros ();
+  if (frameTime < 1000) {
+    delayMicroseconds (1000 - frameTime);
+  }
 }
