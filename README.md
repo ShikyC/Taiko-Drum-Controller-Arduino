@@ -1,7 +1,6 @@
 # Sanro - Arduino
 
-Hardware program of the game Taiko Sanro.[^1]
-[^1]: Taiko Sanro is another open-source taiko game under development. Source code to be published soon. 
+Hardware program of the game Taiko Sanro.
 
 ## What is This Program
 
