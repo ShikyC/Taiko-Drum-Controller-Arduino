@@ -1,6 +1,7 @@
 # Sanro - Arduino
-
+（このREADME.mdは日本語訳版があります、README_JP.mdをご覧ください、訳は完璧には程遠いですが）  
 Hardware program of the game Taiko Sanro.
+
 
 ## What is This Program
 
