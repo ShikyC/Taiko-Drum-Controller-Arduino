@@ -90,7 +90,7 @@ void loop() {
       }
     }
     
-#if MODE_DEBUGjj
+#if MODE_DEBUG
     Serial.print (power [i]);
     Serial.print ("\t");
 #endif
@@ -99,7 +99,6 @@ void loop() {
   }
 
 #if MODE_DEBUG
-// Damn Arduino plotter, the Y axis scale changes too frequently! Use these values to "lock" the plotter's scale.
   Serial.print (50000);
   Serial.print ("\t");
   Serial.print (0);
