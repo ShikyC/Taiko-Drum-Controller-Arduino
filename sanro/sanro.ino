@@ -8,16 +8,23 @@
  *                                                             *
  ***************************************************************/
 
+// Compatibility with Taiko Jiro
 #define MODE_JIRO 1
+
 #define MODE_DEBUG 0
 
 #define CHANNELS 4
 
+// Caches for the soundwave and power
 #define SAMPLE_CACHE_LENGTH 12
 #define POWER_CACHE_LENGTH 3
 
+// Light and heacy hit thresholds
 #define LIGHT_THRES 5000
 #define HEAVY_THRES 20000
+
+// Forced sampling frequency
+#define FORCED_FREQ 1000
 
 #include <limits.h>
 #include <Keyboard.h>
@@ -110,7 +117,10 @@ void loop() {
 // Force the sample frequency to be less than 1000Hz
   unsigned int frameTime = micros () - lastTime;
   lastTime = micros ();
-  if (frameTime < 1000) {
-    delayMicroseconds (1000 - frameTime);
+  if (frameTime < FORCED_FREQ) {
+    delayMicroseconds (FORCED_FREQ - frameTime);
+  } else {
+    // Performance bottleneck;
+    Serial.print ("Exception: forced frequency is too high for the microprocessor to catch up.");
   }
 }
