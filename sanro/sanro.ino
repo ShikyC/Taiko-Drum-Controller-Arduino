@@ -8,12 +8,13 @@
  *                                                             *
  ***************************************************************/
 
-// Compatibility with Taiko Jiro
-#define MODE_JIRO 1
+// New implementation using fast, stable and sensitive piezoelectric
+// ceramic sensors (the same sensors used in electirc drum kit).
+// No longer need microphones.
 
 #define MODE_DEBUG 0
 
-#define CHANNELS 4
+#define CHANNELS 2
 
 // Caches for the soundwave and power
 #define SAMPLE_CACHE_LENGTH 12
@@ -26,13 +27,7 @@
 // Forced sampling frequency
 #define FORCED_FREQ 1000
 
-#include <limits.h>
-#include <Keyboard.h>
 #include "cache.h"
-
-#if MODE_JIRO
-#define HEAVY_THRES LONG_MAX
-#endif
 
 unsigned long int lastTime;
 
@@ -45,9 +40,7 @@ Cache <long int, POWER_CACHE_LENGTH> powerCache [CHANNELS];
 
 bool triggered [CHANNELS];
 
-int pins[] = {A0, A1, A2, A3};  // L don, R don, L kat, R kat
-char lightKeys[] = {'g', 'h', 'f', 'j'};
-char heavyKeys[] = {'t', 'y', 'r', 'u'};
+int pins[] = {A0, A1}; // Don, Kat
 
 void setup() {
   Serial.begin (9600);
