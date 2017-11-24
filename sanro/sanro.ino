@@ -14,51 +14,53 @@
 
 #define CHANNELS 2
 
-#define SAMPLE_CACHE_LENGTH 12
-#define POWER_CACHE_LENGTH 3
+#define SAMPLE_CACHE_LENGTH 5
 
-#define LIGHT_THRES 8000
-#define HEAVY_THRES 20000
+#define DON_SILENCE_THRES 5e3
+#define DON_LIGHT_THRES   5e4
+#define DON_HEAVY_THRES   1e5
 
-#define FORCED_FREQ 1000
+#define KAT_SILENCE_THRES 2e3
+#define KAT_LIGHT_THRES   5e3
+#define KAT_HEAVY_THRES   1e4
+
+//#define FORCED_PERIOD 700
 
 #include "cache.h"
 
-unsigned long int lastTime;
+unsigned long lastTime;
 
-float channelSample [CHANNELS];
-float lastChannelSample [CHANNELS];
-Cache <float, SAMPLE_CACHE_LENGTH> sampleCache [CHANNELS];
-
-float power [CHANNELS];
-Cache <float, POWER_CACHE_LENGTH> powerCache [CHANNELS];
+float channelSample[CHANNELS];
+Cache <float, SAMPLE_CACHE_LENGTH> sampleCache[CHANNELS];
+float power[CHANNELS];
 
 bool triggered [CHANNELS];
+float light_thres[] = {DON_LIGHT_THRES, KAT_LIGHT_THRES};
+float heavy_thres[] = {DON_HEAVY_THRES, KAT_HEAVY_THRES};
+float silence_thres[] = {DON_SILENCE_THRES, KAT_SILENCE_THRES};
 
 int input_pins[] = {A0, A1}; // Don, Kat
 int output_pins[] = {A2, A3, A4, A5}; // Left Don, Left Kat, Right Don, Right Kat
 
+String debug_output[] = {"DON", "KAT"};
+
 void setup() {
-  pinMode(A0, INPUT);
-  pinMode(A1, INPUT);
   pinMode(A2, OUTPUT);
   pinMode(A3, OUTPUT);
   pinMode(A4, OUTPUT);
   pinMode(A5, OUTPUT);
-  Serial.begin (9600);
-  analogReference (INTERNAL);
+  Serial.begin (115200);
+//  analogReference (INTERNAL);
   for (short int i = 0; i < CHANNELS; i++) {
     power [i] = 0;
-    lastChannelSample [i] = 0;
     triggered [i] = false;
   }
   lastTime = 0;
 }
 
 void loop() {
-  
+  lastTime = micros ();
   for (short int i = 0; i < CHANNELS; i++) {
-    
     channelSample[i] = analogRead(input_pins[i]);
     sampleCache[i].put(channelSample [i]);
     
@@ -68,36 +70,33 @@ void loop() {
     tempInt = sampleCache[i].get();
     power[i] += tempInt * tempInt;
     
-    powerCache[i].put(power[i]);
-    lastChannelSample[i] = channelSample[i];
-    if (powerCache[i].get(1) < LIGHT_THRES) {
-      triggered[i] = false;
+    if (power[i] < silence_thres[i]) {
       digitalWrite(output_pins[i], HIGH);
       digitalWrite(output_pins[i] + 2, HIGH);
       digitalWrite(LED_BUILTIN, LOW);
-    }
-
-    if (!triggered [i]) {
-      for (short int j = 0; j < POWER_CACHE_LENGTH - 1; j++) {
-        if (powerCache [i].get (j - 1) >= powerCache [i].get (j)) {
-          break;
-        } else if (powerCache [i].get (1) >= HEAVY_THRES) {
-          triggered [i] = true;
-          digitalWrite(output_pins[i], LOW);
+      triggered[i] = false;
+    } else if (power[i] > light_thres[i]) {
+      if (!triggered [i]) {
+        digitalWrite(output_pins[i], LOW);
+        if (power[i] >= heavy_thres[i]) {
           digitalWrite(output_pins[i] + 2, LOW);
-          digitalWrite(LED_BUILTIN, HIGH);
-        } else if (powerCache [i].get (1) >= LIGHT_THRES) {
-          triggered [i] = true;
-          digitalWrite(output_pins[i], LOW);
-          digitalWrite(LED_BUILTIN, HIGH);
         }
+        digitalWrite(LED_BUILTIN, HIGH);
+//        Serial.println(debug_output[i]);
+      }
+      triggered[i] = true;
+      if (i == 0) {
+        triggered[1] = true;
+        break;
       }
     }
-
-    unsigned int frameTime = micros () - lastTime;
-    lastTime = micros ();
-    if (frameTime < FORCED_FREQ) {
-      delayMicroseconds (FORCED_FREQ - frameTime);
-    }
   }
+  Serial.print(power[0]);
+  Serial.print("\t");
+  Serial.println(power[1]);
+}
+
+void longMicroDelay (float microTime) {
+  delay (microTime / 1000);
+  delayMicroseconds (microTime - floor(microTime / 1000) * 1000);
 }
