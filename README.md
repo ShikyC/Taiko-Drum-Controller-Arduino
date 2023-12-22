@@ -42,7 +42,7 @@ This project aims to help you develop your own **hardware taiko** at home.
 
 1. Hit and reset threshold
    
-   Set `DEBUG 1` (this disables the keyboard output and sends signal values from the serial port), flash the firmware, roll on one of the 4 areas of the drum, and visualize the graph from the output of the serial monitor. The hit threshold should be smaller than your heaviest hit on the drum, and the reset threshold should be greater than the "cave" between roll hits. The reset value should also below the hit value.
+   Set `DEBUG 1` (this disables the keyboard output and sends signal values from the serial port), flash the firmware, roll on one of the 4 areas of the drum, and visualize the graph from the output of the serial monitor. The hit threshold should be smaller than your heaviest hit on the drum, and the reset threshold should be greater than the trough between roll hits. The reset value should also below the hit value.
    
    Repeat the process for the rest 3 areas and find the best one that fits all.
 
