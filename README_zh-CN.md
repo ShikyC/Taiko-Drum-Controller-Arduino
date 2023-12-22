@@ -4,7 +4,7 @@
 
 ![Taiko Drum Controller](./images/banner-taiko.png)
 
-# 太鼓达人控制器 - Arduino
+# 太鼓达人控制器 - Arduino/ESP32
 
 开源硬件程序，用于制作自己的太鼓达人PC控制器。
 
@@ -17,6 +17,8 @@
 ## 你需要什么
 
 1. 一个Arduino Micro或Leonardo微控制器（其他兼容板可能也可以工作，但您需要验证它们是否支持键盘模拟）；
+   
+   如果你用的是ESP32开发板，请切换到“ESP32”分枝。ESP32相比ATMEGA64要快得多，而且可以通过蓝牙无线连接电脑。
    
 2. 4个压电传感器；
    

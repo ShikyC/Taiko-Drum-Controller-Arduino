@@ -4,7 +4,7 @@
 
 ![Taiko Drum Controller](./images/banner-taiko.png)
 
-# Taiko Drum Controller - Arduino
+# Taiko Drum Controller - Arduino/ESP32
 
 Open-source hardware program to make your own Taiko no Tatsujin PC controller.
 
@@ -16,8 +16,10 @@ This project aims to help you develop your own **hardware taiko** at home.
 
 ## What You Need
 
-1. An Arduino Micro or Leonardo microcontroller (other compatible boards might work, but you need to verify that they support keyboard emulation);
+1. An Arduino Micro/Leonardo microcontroller (other compatible boards might work, but you need to verify that they support keyboard emulation);
    
+   Checkout to the "ESP32" branch if you use an ESP32 board. ESP32 is significantly faster than ATMEGA64 and can connect to the computer as a bluetooth keyboard.
+
 2. 4 piezoelectric sensors;
    
 3. Necessary electronic components (breadboards, resistors, LEDs, jumper wires, etc.);
