@@ -14,32 +14,18 @@
 template <class T, int L>
 class Cache {
 public:
-  Cache ();
-  void put (T value);
-  T get (int offset = 0) const;
+  Cache() { memset(data_, 0, sizeof(data_)); }
+  inline void put(T value) {
+    current_ = (current_ + 1) & (L - 1);
+    data_[current_] = value;
+  }
+  inline T get(int offset = 0) const {
+    return data_[(current_ + offset) & (L - 1)];
+  }
 
 private:
-  T data_ [L];
+  T data_[L];
   int current_ = 0;
 };
 
-template <class T, int L>
-Cache <T, L>::Cache () {
-  for (int i = 0; i < L; i++) {
-    data_ [i] = 0;
-  }
-}
-
-template <class T, int L>
-void Cache <T, L>::put (T value) {
-  current_ = (current_ + 1) % L;
-  data_ [current_] = value;
-}
-
-template <class T, int L>
-T Cache <T, L>::get (int offset) const {
-   int index = (current_ + offset) % L;
-   return data_ [index];
-}
-
-#endif // CACHE_H
+#endif  // CACHE_H
