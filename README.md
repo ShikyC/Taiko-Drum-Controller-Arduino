@@ -18,7 +18,7 @@ This project aims to help you develop your own **hardware taiko** at home.
 
 1. An Arduino Micro or Leonardo microcontroller (other compatible boards might work, but you need to verify that they support keyboard emulation);
    
-2. 4 Piezoelectric sensors;
+2. 4 piezoelectric sensors;
    
 3. Necessary electronic components (breadboards, resistors, LEDs, jumper wires, etc.);
    
