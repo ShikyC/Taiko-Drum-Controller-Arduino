@@ -2,6 +2,8 @@
 
 [中文文档在这里](README_zh-CN.md)
 
+![Taiko Drum Controller](./images/banner-taiko.png)
+
 # Taiko Drum Controller - Arduino
 
 Open-source hardware program to make your own Taiko no Tatsujin PC controller.

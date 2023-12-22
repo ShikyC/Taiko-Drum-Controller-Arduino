@@ -2,6 +2,8 @@
 
 [中文文档在这里](README_zh-CN.md)
 
+![Taiko Drum Controller](./images/banner-taiko.png)
+
 # 太鼓ドラムコントローラ - Arduino
 
 オープンソースのハードウェアプログラムで、自分の「太鼓の達人」PCコントローラーを作りましょう。

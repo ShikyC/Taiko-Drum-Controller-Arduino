@@ -2,6 +2,8 @@
 
 [日本語のドキュメントはこちら](README_ja-JP.md)
 
+![Taiko Drum Controller](./images/banner-taiko.png)
+
 # 太鼓达人控制器 - Arduino
 
 开源硬件程序，用于制作自己的太鼓达人PC控制器。
