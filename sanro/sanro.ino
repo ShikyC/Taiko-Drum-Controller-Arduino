@@ -1,126 +1,80 @@
-/***************************************************************
- *                                                             *
- *                Taiko Sanro - Arduino                        *
- *   Support Arduino models with ATmega32u4 microprocessors    *
- *                                                             *
- *          Shiky Chang                    Chris               *
- *     zhangxunpx@gmail.com          wisaly@gmail.com          *
- *                                                             *
- ***************************************************************/
-
-// Compatibility with Taiko Jiro
-#define MODE_JIRO 1
-
-#define MODE_DEBUG 0
-
 #define CHANNELS 4
+#define SAMPLE_CACHE_LENGTH 16 // Must be power of 2 (8, 16, etc.); See cache.h for implementation
+#define HIT_THRES 750          // The thresholds are also dependent on SAMPLE_CACHE_LENGTH, if you
+#define RESET_THRES 300        // changed SAMPLE_CACHE_LENGTH, you must adjust thresholds here
 
-// Caches for the soundwave and power
-#define SAMPLE_CACHE_LENGTH 12
-#define POWER_CACHE_LENGTH 3
+#define DEBUG 0
 
-// Light and heacy hit thresholds
-#define LIGHT_THRES 5000
-#define HEAVY_THRES 20000
-
-// Forced sampling frequency
-#define FORCED_FREQ 1000
-
-#include <limits.h>
 #include <Keyboard.h>
-#include "cache.h"
+#include <limits.h>
 
-#if MODE_JIRO
-#define HEAVY_THRES LONG_MAX
-#endif
+#include "cache.h"
 
 unsigned long int lastTime;
 
-int channelSample [CHANNELS];
-int lastChannelSample [CHANNELS];
-Cache <int, SAMPLE_CACHE_LENGTH> sampleCache [CHANNELS];
+Cache<int, SAMPLE_CACHE_LENGTH> inputWindow[CHANNELS];
+unsigned long power[CHANNELS];
+unsigned long lastPower[CHANNELS];
 
-long int power [CHANNELS];
-Cache <long int, POWER_CACHE_LENGTH> powerCache [CHANNELS];
+bool triggered;
+unsigned long triggeredTime[CHANNELS];
 
-bool triggered [CHANNELS];
+const byte inPins[] = {A0, A1, A2, A3};        // L don, L kat, R don, R kat
+const byte outPins[] = {5, 6, 7, 8};           // LED visualization (optional)
+const char outKeys[] = {'f', 'd', 'j', 'k'};   // L don, L kat, R don, R kat
 
-int pins[] = {A0, A1, A2, A3};  // L don, R don, L kat, R kat
-char lightKeys[] = {'g', 'h', 'f', 'j'};
-char heavyKeys[] = {'t', 'y', 'r', 'u'};
+float sensitivity[] = {1.0, 1.0, 1.0, 1.0};
+
+short maxIndex;
+float maxPower;
 
 void setup() {
-  Serial.begin (9600);
-  Keyboard.begin ();
-  analogReference (DEFAULT);
-  for (short int i = 0; i < CHANNELS; i++) {
-    power [i] = 0;
-    lastChannelSample [i] = 0;
-    triggered [i] = false;
-  }
-  lastTime = 0;
+    Serial.begin(115200);
+    Keyboard.begin();
+    analogReference(DEFAULT);
+    for (byte i = 0; i < CHANNELS; i++) {
+        power[i] = 0;
+        lastPower[i] = 0;
+        triggered = false;
+    }
+    lastTime = 0;
+    maxIndex = -1;
+    maxPower = 0;
 }
 
 void loop() {
-  
-  for (short int i = 0; i < CHANNELS; i++) {
-    
-    channelSample[i] = analogRead (pins [i]);
-    sampleCache [i].put (channelSample [i] - lastChannelSample [i]);
-    
-    long int tempInt;
-    tempInt = sampleCache [i].get (1);
-    power [i] -= tempInt * tempInt;
-    tempInt = sampleCache [i].get ();
-    power [i] += tempInt * tempInt;
-    if (power [i] < LIGHT_THRES) {
-      power [i] = 0;
-    }
-    
-    powerCache [i].put (power [i]);
-    lastChannelSample [i] = channelSample [i];
-    if (powerCache [i].get (1) == 0) {
-      triggered [i] = false;
+
+    if (maxIndex != -1 && lastPower[maxIndex] < RESET_THRES) {
+        triggered = false;
+        digitalWrite(outPins[maxIndex], LOW);
+        maxIndex = -1;
+        maxPower = 0;
     }
 
-    if (!triggered [i]) {
-      for (short int j = 0; j < POWER_CACHE_LENGTH - 1; j++) {
-        if (powerCache [i].get (j - 1) >= powerCache [i].get (j)) {
-          break;
-        } else if (powerCache [i].get (1) >= HEAVY_THRES) {
-          triggered [i] = true;
-          Keyboard.print (heavyKeys [i]);
-        } else if (powerCache [i].get (1) >= LIGHT_THRES) {
-          triggered [i] = true;
-          Keyboard.print (lightKeys [i]);
+    for (byte i = 0; i < CHANNELS; i++) {
+
+        inputWindow[i].put(analogRead(inPins[i]));
+        power[i] = sensitivity[i] * (power[i] - inputWindow[i].get(1) + inputWindow[i].get());
+
+        if (lastPower[i] > maxPower && power[i] < lastPower[i]) {
+            maxPower = lastPower[i];
+            maxIndex = i;
         }
-      }
+        lastPower[i] = power[i];
+#if DEBUG
+        Serial.print(power[i]);
+        Serial.print(" ");
+#endif
     }
-    
-#if MODE_DEBUG
-    Serial.print (power [i]);
-    Serial.print ("\t");
+
+    if (!triggered && maxPower >= HIT_THRES) {
+        triggered = true;
+        digitalWrite(outPins[maxIndex], HIGH);
+#if !DEBUG
+        Keyboard.print(outKeys[maxIndex]);
 #endif
-
-// End of each channel
-  }
-
-#if MODE_DEBUG
-  Serial.print (50000);
-  Serial.print ("\t");
-  Serial.print (0);
-  Serial.print ("\t");
-
-  Serial.println ("");
+    }
+#if DEBUG
+    Serial.print("\n");
 #endif
-
-// Force the sample frequency to be less than 1000Hz
-  unsigned int frameTime = micros () - lastTime;
-  lastTime = micros ();
-  if (frameTime < FORCED_FREQ) {
-    delayMicroseconds (FORCED_FREQ - frameTime);
-  } else {
-    // Performance bottleneck;
-    Serial.print ("Exception: forced frequency is too high for the microprocessor to catch up.");
-  }
 }
