@@ -1,4 +1,3 @@
-
 // Bluetooth keyboard implemetation by manuelbl:
 // https://gist.github.com/manuelbl/66f059effc8a7be148adb1f104666467
 
@@ -216,4 +215,18 @@ void typeText(const char* text) {
 
         delay(5);
     }
+}
+
+void typeChar(char c) {
+    uint8_t val = (uint8_t)c;
+    KEYMAP map = keymap[val];
+    InputReport report = {.modifiers = map.modifier,
+                          .reserved = 0,
+                          .pressedKeys = {map.usage, 0, 0, 0, 0, 0}};
+    input->setValue((uint8_t*)&report, sizeof(report));
+    input->notify();
+    delay(1);
+    input->setValue((uint8_t*)&NO_KEY_PRESSED, sizeof(NO_KEY_PRESSED));
+    input->notify();
+    delay(1);
 }
