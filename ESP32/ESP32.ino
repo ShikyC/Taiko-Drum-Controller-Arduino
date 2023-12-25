@@ -25,9 +25,6 @@ float sensitivity[] = {1.0, 1.0, 1.0, 1.0};
 short maxIndex;
 float maxPower;
 
-void bluetoothTask(void*);
-void typeText(const char* text);
-
 unsigned long lastTime;
 
 void setup() {

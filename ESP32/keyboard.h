@@ -6,7 +6,7 @@
 #include "HIDKeyboardTypes.h"
 #include "HIDTypes.h"
 
-#define DEVICE_NAME "ESP32 Bluetooth Keyboard"
+#define DEVICE_NAME "ESP32 Taiko Controller"
 
 bool isBleConnected = false;
 
