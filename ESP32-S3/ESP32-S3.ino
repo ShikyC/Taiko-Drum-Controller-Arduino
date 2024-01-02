@@ -25,10 +25,10 @@
 #define R_KAT_IN 7
 
 // Output LED pins for each channel (just for visualization)
-#define L_DON_LED 9
-#define L_KAT_LED 10
-#define R_DON_LED 11
-#define R_KAT_LED 12
+#define L_DON_LED 10
+#define L_KAT_LED 11
+#define R_DON_LED 12
+#define R_KAT_LED 13
 
 // Keyboard output for each channel
 #define L_DON_KEY 'f'
