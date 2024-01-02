@@ -1,16 +1,46 @@
 #define CHANNELS 4
-#define SAMPLE_CACHE_LENGTH 16 // Must be power of 2 (8, 16, etc.); See cache.h for implementation
-#define HIT_THRES 750          // The thresholds are also dependent on SAMPLE_CACHE_LENGTH, if you
-#define RESET_THRES 300        // changed SAMPLE_CACHE_LENGTH, you must adjust thresholds here
 
+// SAMPLE_CACHE_LENGTH must be power of 2 (8, 16, 32, etc.)
+// See cache.h for implementation
+#define SAMPLE_CACHE_LENGTH 16
+
+// The thresholds are also dependent on SAMPLE_CACHE_LENGTH, if you
+// changed SAMPLE_CACHE_LENGTH, you should also adjust thresholds
+#define HIT_THRES 750
+#define RESET_THRES 200
+
+// Sensitivity multipliers for each channel, 1.0 as the baseline
+#define L_DON_SENS 1.0
+#define L_KAT_SENS 1.0
+#define R_DON_SENS 1.0
+#define R_KAT_SENS 1.0
+
+// Input pins for each channel
+#define L_DON_IN A0
+#define L_KAT_IN A1
+#define R_DON_IN A2
+#define R_KAT_IN A3
+
+// Output LED pins for each channel (just for visualization)
+#define L_DON_LED 5
+#define L_KAT_LED 6
+#define R_DON_LED 7
+#define R_KAT_LED 8
+
+// Keyboard output for each channel
+#define L_DON_KEY 'f'
+#define L_KAT_KEY 'd'
+#define R_DON_KEY 'j'
+#define R_KAT_KEY 'k'
+
+// Enable debug mode to view analog input values from the Serial
+// Enabling this also disables the keyboard simulation
 #define DEBUG 0
 
 #include <Keyboard.h>
 #include <limits.h>
 
 #include "cache.h"
-
-unsigned long int lastTime;
 
 Cache<int, SAMPLE_CACHE_LENGTH> inputWindow[CHANNELS];
 unsigned long power[CHANNELS];
@@ -19,11 +49,10 @@ unsigned long lastPower[CHANNELS];
 bool triggered;
 unsigned long triggeredTime[CHANNELS];
 
-const byte inPins[] = {A0, A1, A2, A3};        // L don, L kat, R don, R kat
-const byte outPins[] = {5, 6, 7, 8};           // LED visualization (optional)
-const char outKeys[] = {'f', 'd', 'j', 'k'};   // L don, L kat, R don, R kat
-
-float sensitivity[] = {1.0, 1.0, 1.0, 1.0};
+const byte inPins[] = {L_DON_IN, L_KAT_IN, R_DON_IN, R_KAT_IN};
+const byte outPins[] = {L_DON_LED, L_KAT_LED, R_DON_LED, R_KAT_LED};
+const char outKeys[] = {L_DON_KEY, L_KAT_KEY, R_DON_KEY, R_KAT_KEY};
+float sensitivities[] = {L_DON_SENS, L_KAT_SENS, R_DON_SENS, R_KAT_SENS};
 
 short maxIndex;
 float maxPower;
@@ -37,13 +66,11 @@ void setup() {
         lastPower[i] = 0;
         triggered = false;
     }
-    lastTime = 0;
     maxIndex = -1;
     maxPower = 0;
 }
 
 void loop() {
-
     if (maxIndex != -1 && lastPower[maxIndex] < RESET_THRES) {
         triggered = false;
         digitalWrite(outPins[maxIndex], LOW);
@@ -52,9 +79,9 @@ void loop() {
     }
 
     for (byte i = 0; i < CHANNELS; i++) {
-
         inputWindow[i].put(analogRead(inPins[i]));
-        power[i] = sensitivity[i] * (power[i] - inputWindow[i].get(1) + inputWindow[i].get());
+        power[i] = sensitivities[i] *
+                   (power[i] - inputWindow[i].get(1) + inputWindow[i].get());
 
         if (lastPower[i] > maxPower && power[i] < lastPower[i]) {
             maxPower = lastPower[i];
