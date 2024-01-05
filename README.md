@@ -91,3 +91,40 @@ This project aims to help you develop your own hardware taiko at home.
    Using a bridge rectifier, all negative values are converted to positive. In other words, it's like the `abs()` function, ensuring that we don't lose any negative voltages.
 
    ![Why using bridge rectifiers](./images/bridge_signal.png)
+
+# Taiko Controller - Analog Input Mode (Beta)
+
+With ESP32-S2 or ESP32-S3 controllers, instead of keyboard emulation, the drum controller can work as a gamepad and send its axes values to the game (which also must support analog input). In this way, the game can recognize different force levels of the hit.
+
+If you prefer to use the Arduino Micro/Leonardo board, please refer to the [Arduino XInput Library](https://github.com/dmadison/ArduinoXInput) to implement the gamepad.
+
+## What You Need
+
+1. Make your drum or use Taiko Force Lv.5.
+
+2. Flash `ESP32-S3-Analog/ESP32-S3-Analog.ino` to your controller.
+
+3. A working ***game***, with these modifications:
+
+   - Backup and replace the `bnusio.dll` file in the game folder with the one here in the `extra/` folder.
+
+     This file is compiled from [this fork](https://github.com/ShikyC/TaikoArcadeLoader/tree/Refactor) and you can compile it by yourself if you want.
+
+     *This modified library only works with a specific game version. If it breaks your game, please clone the original repository, make the corrensponding modifications, and compile it.*
+
+   - Open the `gamecontrollerdb.txt` file in the game folder and add one entry under `#Windows`: 
+   
+     `030052a8694800006948000000000000,Taiko Controller,+leftx:+a0,+lefty:+a1,+rightx:+a3,+righty:+a4,platform:Windows,`
+
+     This will tell the game that our ESP32 controller is a gamepad called "Taiko Controller", and map the axis to the standard SDL2 library so that the game can recognize the analog inputs.
+
+   -  Open the `config.toml` file and add the following lines at the end:
+     
+     ```
+     [controller]
+     analog = true
+     ```
+
+     Note that with `analog = true`, all the keyboard drum inputs are disabled. Sorry for this but it need further refactoring to make them work together. If you want to switch back to keyboard inputs, set `analog = false`.
+
+4. Launch the game and enjoy!

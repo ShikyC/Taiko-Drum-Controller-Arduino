@@ -91,3 +91,40 @@
    使用桥式整流器，所有负值都转换为正值。换句话说，就像`abs()`函数，确保我们不会丢失任何负电压。
 
    ![为什么使用桥式整流器](./images/bridge_signal.png)
+
+# Taiko Controller - 模拟输入模式
+
+使用ESP32-S2或ESP32-S3控制器，代替键盘仿真，鼓控制器可以作为游戏手柄工作，并将其轴值发送给游戏（游戏也必须支持模拟输入）。这样，游戏可以识别击打的不同力度级别。
+
+如果您更喜欢使用Arduino Micro/Leonardo板，请参考[Arduino XInput库](https://github.com/dmadison/ArduinoXInput)来实现游戏手柄。
+
+## 你需要什么
+
+1. 制作你的鼓或使用Taiko Force Lv.5。详情请查看主分支。
+
+2. 将`ESP32-S3-Analog/ESP32-S3-Analog.ino`刷写到你的控制器。
+
+3. 一个能正常运行的***游戏***，并进行以下修改：
+
+   - 备份并替换游戏文件夹中的`bnusio.dll`文件，使用这里`extra/`文件夹中的文件。
+
+     这个文件是从[这个仓库](https://github.com/ShikyC/TaikoArcadeLoader/tree/Refactor)编译的，如果你愿意，你也可以自己编译。
+
+     *这个修改过的库只适用于特定版本的游戏。如果它破坏了你的游戏，请克隆[原始仓库](https://github.com/BroGamer4256/TaikoArcadeLoader)，进行相应的修改，并编译它。*
+
+   - 打开游戏文件夹中的`gamecontrollerdb.txt`文件，并在`#Windows`下添加一条条目：
+
+     `030052a8694800006948000000000000,Taiko Controller,+leftx:+a0,+lefty:+a1,+rightx:+a3,+righty:+a4,platform:Windows,`
+
+     这将告诉游戏我们的ESP32控制器是一个名为“Taiko Controller”的游戏手柄，并将轴映射到标准SDL2库，以便游戏能够识别模拟输入。
+
+   - 打开`config.toml`文件，并在末尾添加以下行：
+
+     ```
+     [controller]
+     analog = true
+     ```
+
+     请注意，使用`analog = true`时，所有键盘鼓输入都将被禁用。对此表示抱歉，但它需要进一步重构才能同时工作。如果你想切换回键盘输入，请设置`analog = false`。
+
+4. 开始游玩咚！
