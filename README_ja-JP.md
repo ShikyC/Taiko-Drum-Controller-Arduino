@@ -114,7 +114,7 @@ Arduino Micro/Leonardoボードを使用する場合は、[Arduino XInputライ�
 
    - ゲームフォルダ内の`gamecontrollerdb.txt`ファイルを開き、`#Windows`の下に次のエントリを追加します：
 
-     `030052a8694800006948000000000000,Taiko Controller,-leftx:-a0,+leftx:+a0,-lefty:-a1,+lefty:+a1,-rightx:-a3,+rightx:+a3,-righty:-a4,+righty:+a4,platform:Windows,`
+     `030052a8694800006948000000000000,Taiko Controller,-leftx:-a0,+leftx:+a0,-lefty:-a1,+lefty:+a1,-rightx:-a2,+rightx:+a2,-righty:-a3,+righty:+a3,platform:Windows,`
 
      これにより、ゲームはESP32コントローラーが「Taiko Controller」というゲームパッドであることを認識し、標準のSDL2ライブラリに軸をマップするため、ゲームがアナログ入力を認識できるようになります。
 

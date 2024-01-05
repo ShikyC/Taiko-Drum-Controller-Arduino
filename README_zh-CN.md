@@ -114,7 +114,7 @@
 
    - 打开游戏文件夹中的`gamecontrollerdb.txt`文件，并在`#Windows`下添加一条条目：
 
-     `030052a8694800006948000000000000,Taiko Controller,-leftx:-a0,+leftx:+a0,-lefty:-a1,+lefty:+a1,-rightx:-a3,+rightx:+a3,-righty:-a4,+righty:+a4,platform:Windows,`
+     `030052a8694800006948000000000000,Taiko Controller,-leftx:-a0,+leftx:+a0,-lefty:-a1,+lefty:+a1,-rightx:-a2,+rightx:+a2,-righty:-a3,+righty:+a3,platform:Windows,`
 
      这将告诉游戏我们的ESP32控制器是一个名为“Taiko Controller”的游戏手柄，并将轴映射到标准SDL2库，以便游戏能够识别模拟输入。
 
