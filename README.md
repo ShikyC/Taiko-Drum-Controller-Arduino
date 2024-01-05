@@ -114,7 +114,7 @@ If you prefer to use the Arduino Micro/Leonardo board, please refer to the [Ardu
 
    - Open the `gamecontrollerdb.txt` file in the game folder and add one entry under `#Windows`: 
    
-     `030052a8694800006948000000000000,Taiko Controller,+leftx:+a0,+lefty:+a1,+rightx:+a3,+righty:+a4,platform:Windows,`
+     `030052a8694800006948000000000000,Taiko Controller,-leftx:-a0,+leftx:+a0,-lefty:-a1,+lefty:+a1,-rightx:-a3,+rightx:+a3,-righty:-a4,+righty:+a4,platform:Windows,`
 
      This will tell the game that our ESP32 controller is a gamepad called "Taiko Controller", and map the axis to the standard SDL2 library so that the game can recognize the analog inputs.
 
