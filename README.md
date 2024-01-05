@@ -6,7 +6,7 @@
 
 # Taiko Drum Controller - Arduino (ATmega32U4/ESP32)
 
-Open-source hardware program to make your own Taiko no Tatsujin PC controller.
+Open-source hardware program to make your own Taiko no Tatsujin PC controller. It can emulate as a keyboard, or as an analog joystick to enable hitting force sensing - just like how you play on the arcade machine. Now also support 2 drums so you can enjoy the game together with your friends at home!
 
 ## About this Project
 
