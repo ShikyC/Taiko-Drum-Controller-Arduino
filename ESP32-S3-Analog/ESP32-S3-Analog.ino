@@ -46,7 +46,7 @@
 #define P1_R_DON_IN 6
 #define P1_R_KAT_IN 7
 #define P2_L_DON_IN 8
-#define P2_L_KAT_IN 3
+#define P2_L_KAT_IN 1
 #define P2_R_DON_IN 9
 #define P2_R_KAT_IN 10
 
