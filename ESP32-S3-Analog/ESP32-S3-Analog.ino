@@ -46,19 +46,9 @@
 #define P1_R_DON_IN 6
 #define P1_R_KAT_IN 7
 #define P2_L_DON_IN 8
-#define P2_L_KAT_IN 3
+#define P2_L_KAT_IN 1
 #define P2_R_DON_IN 9
 #define P2_R_KAT_IN 10
-
-// Output LED pins for each channel (just for visualization)
-#define P1_L_DON_LED 11
-#define P1_L_KAT_LED 12
-#define P1_R_DON_LED 13
-#define P1_R_KAT_LED 14
-#define P2_L_DON_LED 42
-#define P2_L_KAT_LED 41
-#define P2_R_DON_LED 40
-#define P2_R_KAT_LED 39
 
 #define AXIS_RANGE 1023
 
@@ -70,10 +60,7 @@ const byte inPins[PLAYERS][CHANNELS] = {
     P1_L_DON_IN, P1_L_KAT_IN, P1_R_DON_IN, P1_R_KAT_IN, 
     P2_L_DON_IN, P2_L_KAT_IN, P2_R_DON_IN, P2_R_KAT_IN
 };
-const byte outPins[PLAYERS][CHANNELS] = {
-    P1_L_DON_LED, P1_L_KAT_LED, P1_R_DON_LED, P1_R_KAT_LED, 
-    P2_L_DON_LED, P2_L_KAT_LED, P2_R_DON_LED, P2_R_KAT_LED
-};
+
 const float sensitivities[PLAYERS][CHANNELS] = {
     P1_L_DON_SENS, P1_L_KAT_SENS, P1_R_DON_SENS, P1_R_KAT_SENS, 
     P2_L_DON_SENS, P2_L_KAT_SENS, P2_R_DON_SENS, P2_R_KAT_SENS
@@ -107,7 +94,6 @@ void setup() {
             triggered[p] = false;
 #endif
             pinMode(inPins[p][i], INPUT);
-            pinMode(outPins[p][i], OUTPUT);
         }
 #if !RAW_ANALOG_MODE
         maxIndex[p] = -1;
@@ -127,12 +113,12 @@ void setup() {
 }
 
 void loop() {
-
+    
     for (byte p = 0; p < PLAYERS; p++) {
 
         for (byte i = 0; i < CHANNELS; i++) {
             inputWindow[p][i].put(analogRead(inPins[p][i]));
-            power[p][i] = sensitivities[p][i] * (power[p][i] - inputWindow[p][i].get(1) + inputWindow[p][i].get());
+            power[p][i] = power[p][i] - inputWindow[p][i].get(1) + inputWindow[p][i].get();
 #if !RAW_ANALOG_MODE
             if (lastPower[p][i] > maxPower[p] && power[p][i] < lastPower[p][i]) {
                 maxPower[p] = lastPower[p][i];
@@ -140,20 +126,19 @@ void loop() {
             }
             lastPower[p][i] = power[p][i];
 #else
-            axisValues[p][i] = AXIS_RANGE * (power[p][i] > MAX_THRES ? 1 : ((float)power[p][i] / MAX_THRES));
+            float v = pow(5.0, sensitivities[p][i] / 2048.0 - 1) * power[p][i];
+            axisValues[p][i] = AXIS_RANGE * (v >= MAX_THRES ? 1 : (v / MAX_THRES));
 #endif
         }
 #if !RAW_ANALOG_MODE
         if (!triggered[p] && maxPower[p] >= HIT_THRES) {
             triggered[p] = true;
-            digitalWrite(outPins[p][maxIndex[p]], HIGH);
             outputValue[p] = (int)(AXIS_RANGE * (maxPower[p] >= MAX_THRES ? 1 : maxPower[p] / MAX_THRES));
         }
 
         if (triggered[p] && resetTimer[p] >= RESET_TIME) {
             triggered[p] = false;
             resetTimer[p] = 0;
-            digitalWrite(outPins[p][maxIndex[p]], LOW);
             maxPower[p] = 0;
             maxIndex[p] = -1;
             outputValue[p] = 0;
