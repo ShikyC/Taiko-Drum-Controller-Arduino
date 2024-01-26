@@ -126,10 +126,7 @@ void loop() {
             }
             lastPower[p][i] = power[p][i];
 #else
-            float x2 = sensitivities[p][i] * sensitivities[p][i];
-            float x3 = x2 * sensitivities[p][i];
-            float x4 = x3 * sensitivities[p][i];
-            float v = power[p][i] * (1.0 + sensitivities[p][i] + 0.5 * x2 + 0.166667 * x3);
+            float v = power[p][i] * sensitivities[p][i];
             axisValues[p][i] = AXIS_RANGE * (v >= MAX_THRES ? 1 : (v / MAX_THRES));
 #endif
         }
