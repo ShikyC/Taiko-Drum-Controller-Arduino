@@ -20,7 +20,7 @@
   Edited by Schnoog to make it running on ESP32-S2/s3 devices
 */
 
-#include "Joystick_ESP32S2.h"
+#include "joystick.h"
 
 #define JOYSTICK_REPORT_ID_INDEX 7
 #define JOYSTICK_AXIS_MINIMUM 0
