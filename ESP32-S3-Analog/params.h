@@ -26,15 +26,15 @@
   RECOMMENDED UNLESS YOU KNOW HOW THEY WORK
 ***********************************************/
 
-// Cache length must be the power of 2 (8, 16, 32, etc.)
-// See cache.h for the reason
+// Cache length must be the power of 2 (8, 16, 32, etc.).
+// See cache.h for the reason.
 #define SAMPLE_CACHE_LENGTH 32
 
 // The maximum value of a hit (not the minumum value to trigger a heavy hit)
-// To configure the light and heavy thresholds, do it in the game settings
+// To configure the light and heavy thresholds, do it in the game settings.
 #define MAX_THRES 5000
 
-// Input pins for each channel
+// Input pins for each channel.
 #define P1_L_DON_IN 4
 #define P1_L_KAT_IN 5
 #define P1_R_DON_IN 6
@@ -45,7 +45,7 @@
 #define P2_R_DON_IN 9
 #define P2_R_KAT_IN 10
 
-// Sensitivity adjustment potentiometer input pins
+// Sensitivity adjustment potentiometer input pins.
 #define P1_L_DON_SENS_IN 15
 #define P1_L_KAT_SENS_IN 16
 #define P1_R_DON_SENS_IN 17
@@ -56,16 +56,16 @@
 #define PLAYERS 2
 #define CHANNELS 4
 
-#ifndef RAW_ANALOG_MODE
-// The minimum value to trigger a light hit
+// The minimum value to trigger a light hit.
+// Disabled if RAW_ANALOG_MODE is on.
 #define HIT_THRES 1000
 
 // If the reset time is too short, the game may not be able to 
 // receive the input. From testing I found 40 seems to be the
 // minimum value so that the game won't miss any hit. If the game
-// occassionally miss the drum input, increase this value
+// occassionally miss the drum input, increase this value.
+// Disabled if RAW_ANALOG_MODE is on.
 #define RESET_TIME 40
-#endif
 
 #include <USB.h>
 #include "joystick.h"
