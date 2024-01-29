@@ -4,7 +4,7 @@ const byte inPins[CHANNELS] = {
     P1_L_DON_IN, P1_L_KAT_IN, P1_R_DON_IN, P1_R_KAT_IN
 };
 const byte sensitivityPins[CHANNELS] = {
-    P1_L_DON_SENS, P1_L_KAT_SENS, P1_R_DON_SENS, P1_R_KAT_SENS
+    P1_L_DON_SENS_IN, P1_L_KAT_SENS_IN, P1_R_DON_SENS_IN, P1_R_KAT_SENS_IN
 };
 
 Cache<int, SAMPLE_CACHE_LENGTH> inputWindow[CHANNELS];

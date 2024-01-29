@@ -46,10 +46,10 @@
 #define P2_R_KAT_IN 10
 
 // Sensitivity adjustment potentiometer input pins
-#define P1_L_DON_SENS 15
-#define P1_L_KAT_SENS 16
-#define P1_R_DON_SENS 17
-#define P1_R_KAT_SENS 18
+#define P1_L_DON_SENS_IN 15
+#define P1_L_KAT_SENS_IN 16
+#define P1_R_DON_SENS_IN 17
+#define P1_R_KAT_SENS_IN 18
 
 #define AXIS_RANGE 1023
 
