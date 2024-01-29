@@ -21,10 +21,10 @@
 #define P2_R_DON_SENS 1.0
 #define P2_R_KAT_SENS 1.0
 
-/********************************************************
-  CHANGING THE FOLLOWING PARAMETERS ARE NOT RECOMMENDED 
-  UNLESS YOU KNOW HOW THEY WORKS
-**********************************************************/
+/**********************************************
+  CHANGING THE FOLLOWING PARAMETERS ARE NOT
+  RECOMMENDED UNLESS YOU KNOW HOW THEY WORK
+***********************************************/
 
 // Cache length must be the power of 2 (8, 16, 32, etc.)
 // See cache.h for the reason
