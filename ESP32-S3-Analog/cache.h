@@ -16,11 +16,11 @@ class Cache {
 public:
   Cache() { memset(data_, 0, sizeof(data_)); }
   inline void put(T value) {
-    current_ = (current_ + 1) & (L - 1);
+    current_ = (current_ + 1) % L;
     data_[current_] = value;
   }
   inline T get(int offset = 0) const {
-    return data_[(current_ + offset) & (L - 1)];
+    return data_[(current_ + offset) % L];
   }
 
 private:
