@@ -128,3 +128,15 @@ If you prefer to use the Arduino Micro/Leonardo board, please refer to the [Ardu
      Note that with `analog = true`, all the keyboard drum inputs are disabled. Sorry for this but it need further refactoring to make them work together. If you want to switch back to keyboard inputs, set `analog = false`.
 
 4. Launch the game and enjoy!
+
+## Online Signal Visualizer Tool
+
+If you find debugging and finding the best sensitivity values very inconvenient with serial port's communications, you can use this [taiko signal visualizer](https://shiky.me/taiko). It's a simple tool I created to show the output of the Taiko Controller (ESP32-Analog version only).
+
+Just connect the board to the computer (using the USB port, not the serial port) and the waveform will be shown in the graphs. So you don't need to turn on debug mode or using `Serial.print()` command to obtain the values to tune the sensitivities.
+
+### How it works
+
+The analog version of the controller simulates as a gamepad and sends the hit force values to the game as the axis values of the left and right joysticks. So with the built-in `Gamepad` API it's very easy to read the values directly. To prevent the tool reading from other gamepads, the controller must be named with `Taiko Controller (Vendor: 4869 Product: 4869)`, so please don't change the `pID` and `vID` values in the firmware.
+
+![Taiko Test Tool](./images/taiko_test.webp)
