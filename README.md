@@ -103,6 +103,11 @@ The current PCB package is available under [`PCB/`](./PCB/):
 
 The board is designed around the ESP32-S3-WROOM-1U module and the DMA-based firmware in this repository. Review the BOM and board files before ordering or assembly, especially while the housing and final assembly guide are still in progress.
 
+## Credits
+
+- The PCB design is based on the open-source ESP32-S3 minimal system board project published on OSHWHub: [esp32s3-zui-xiao-xi-tong-ban-20241211](https://oshwhub.com/sun1053/esp32s3-zui-xiao-xi-tong-ban-20241211).
+- The ADC DMA implementation is based on Espressif's official ESP-IDF ADC continuous mode example code.
+
 ## Build and Flash
 
 Install and activate ESP-IDF, then build for ESP32-S3:
