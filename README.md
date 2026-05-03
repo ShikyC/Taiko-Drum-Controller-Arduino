@@ -1,142 +1,221 @@
-[日本語のドキュメントはこちら](README_ja-JP.md)
-
-[中文文档在这里](README_zh-CN.md)
+> **Legacy implementation archived:** the old Arduino/ATmega32U4 and earlier ESP32 implementation from `master` has reached end of life and is archived on the `archive-arduino-legacy` branch. This branch documents the refactored ESP-IDF implementation.
 
 ![Taiko Drum Controller](./images/banner-taiko.png)
 
-# Taiko Drum Controller - Arduino (ATmega32U4/ESP32)
+# Taiko Drum Controller - ESP32-S3
 
-Open-source hardware program to make your own Taiko no Tatsujin PC controller. It can emulate as a keyboard, or as an analog joystick to enable hitting force sensing - just like how you play on the arcade machine. Now also support 2 drums so you can enjoy the game together with your friends at home!
+Open-source firmware for building a USB taiko drum controller for PC play. The refactored implementation is focused on ESP32-S3, TinyUSB HID gamepad output, and continuous ADC sampling through DMA.
 
-## About this Project
+This version is intended for Taiko Force Lv. 6 style drums and other two-player, eight-sensor taiko builds. The older Arduino keyboard/gamepad implementations are no longer maintained in this branch.
 
-This project aims to help you develop your own hardware taiko at home.
+**This project is for personal and non-commercial use only.**
 
-**This program is for personal and non-commercial use only.**
+## Current Status
 
-## What You Need
+- Supports Taiko Force Lv. 6 drum wiring through ESP32-S3 ADC continuous mode with DMA.
+- Reports as a USB HID gamepad named `Taiko Controller` with vendor/product ID `0x4869:0x4869`.
+- Samples eight ADC channels, covering two players with four zones each.
+- Sends analog hit strength through gamepad axes instead of keyboard events.
+- Uses ESP-IDF and TinyUSB. Arduino SDK support has been removed.
+- PCB Gerber files and BOM are available in [`PCB/`](./PCB/).
+- 3D printed housing is under construction and will be added when ready.
 
-1. An Arduino Micro/Leonardo (ATmega32U4) board or an Arduino Nano ESP (ESP32) board.
-   
-   Most ATmega32U4 boards work, but you need to verify that they support keyboard emulation; ATmega328P boards like Arduino Uno don't work.
-   
-   ESP32 is strongly recommended because it's significantly more powerful than ATmega32U4. This project uses an ESP32-WROOM-32 board.
+## Hardware Support
 
-2. 4 piezoelectric sensors.
-   
-3. 8 100kΩ resistors.
-   
-4. (Optional) 4 bridge rectifier chips such as [DB107](https://www.diodes.com/assets/Datasheets/products_inactive_data/ds21211_R5.pdf) (see the Additional Notes section for details).
+The supported target is **ESP32-S3**.
 
-5. (Optional) Some red and blue LEDs.
-   
-6. Necessary electronic components (breadboards and jumper wires, etc.).
-   
-7. Wood planks and cutting tools (only if you need to make your physical taiko drum from scratch). If you have an aftermarket taiko or a Big Power Lv. 5 drum, you can use them directly.
+Other ESP32 variants may work if they support the same ADC continuous mode, DMA behavior, USB device mode, and pin availability, but they are not tested. Arduino boards, ATmega32U4 boards, and non-USB ESP32 development boards are not supported by this refactored firmware.
 
-## Steps to Make the Controller
+## Firmware Overview
 
-1. Make the drum and firmly glue the 4 piezoelectric sensors to the drum. Refer to the image for preferred locations of the sensors.
-   
-   ![Sensor Setup](./images/piezo_locations.png)
+The firmware in [`main/taiko_controller.c`](./main/taiko_controller.c) does four main things:
 
-2. Connect the piezoelectric sensors and other components to the controller as follows (the polarity of the piezoelectric sensors don't matter);
+1. Configures TinyUSB as a HID gamepad.
+2. Configures ADC continuous sampling for eight drum sensor inputs.
+3. Uses DMA frames to accumulate ADC samples at a stable rate.
+4. Converts recent per-zone signal power into signed gamepad axis values.
 
-   The following schemes are for Arduino Micro boards. If you use a different board, refer to its documentations for the connection.
-   
-   ![Controller scheme](./images/scheme.png)
+The current sampling model is:
 
-   If you choose to add the bridge rectifiers, use the following scheme:
-   
-   ![Controller scheme with bridge rectifiers](./images/scheme_bridge.png)
+- `PLAYERS`: `2`
+- `CHANNELS_PER_PLAYER`: `4`
+- `TOTAL_CHANNELS`: `8`
+- `PER_CHANNEL_SAMPLE_RATE_HZ`: `10000`
+- `USB_REPORT_INTERVAL_US`: `2000`
+- `POWER_RING_SIZE`: `3`
 
-3. Flash the firmware to the board.
-   
-   You may need to fine-tune some parameters like `SAMPLE_CACHE_LENGTH`, `HIT_THRES`, `RESET_THRES`, and `sensitivity`. See the following section for details. 
+Each player has four zones:
 
-4. Have fun!
+1. Left don
+2. Left kat
+3. Right don
+4. Right kat
 
-## Tuning the Parameters
+Only the strongest zone for each player is emitted in each HID report. Don zones are sent as positive axis values and kat zones are sent as negative axis values.
 
-1. Hit and reset threshold
-   
-   Set `DEBUG 1` (this disables the keyboard output and sends signal values from the serial port), flash the firmware, roll on one of the 4 areas of the drum, and visualize the graph from the output of the serial monitor. The hit threshold should be lower than your heaviest hit on the drum, and the reset threshold should be greater than the trough between roll hits. The reset value should also be below the hit value.
-   
-   Repeat the process for the rest 3 areas and find the best one that fits all.
+## Pin Map
 
-   ![Setting hit and reset values](./images/tune_hit_reset.png)
+The default ADC pin map uses ADC1 GPIOs on ESP32-S3 and avoids the native USB pins.
 
-2. Sampling length
-   
-   For maximum runtime speed, the `cache.h` library has been optimized to work with `SAMPLE_CACHE_LENGTH` window sizes of powers of 2. That means 2, 8, 16, and 32, etc. Practically 16 is the best value for Arduino, but if you have a powerful microcontroller that samples the input at the speed of at least 4000Hz or more, you can change the value to 32 for a smoother (in other words, less noisy) curve.
+| Player | Zone | GPIO |
+| --- | --- | --- |
+| P1 | Left don | 3 |
+| P1 | Left kat | 4 |
+| P1 | Right don | 5 |
+| P1 | Right kat | 6 |
+| P2 | Left don | 7 |
+| P2 | Left kat | 8 |
+| P2 | Right don | 9 |
+| P2 | Right kat | 10 |
 
-3. Sensitivities
-   
-   Not all piezoelectric sensors are the same, and due to installation errors, the captured signals from the 4 sensors may vary significantly. The sensitivity values are multipliers to normalize the differences. In the following example, the right-don area generates a much higher value than the rest 3, so you can adjust `sensitivity` to `{1.0, 1.0, 0.5, 1.0}` to eliminate the issue.
+Debug outputs:
 
-   ![Setting sensitivity values](./images/tune_sensitivities.png)
+| GPIO | Meaning |
+| --- | --- |
+| 1 | High when ADC read fails or times out |
+| 2 | High when the USB HID host is not ready |
 
-   Note that the installation of the sensors is very critical. You should make sure that the sensors are firmly attached on the wood and located properly.
+If you change pins, use ADC-capable pins for the selected ESP32-S3 board and keep GPIO 19/20 free for native USB unless your board routes USB differently.
 
-## Additional Notes
+## Requirements
 
-1. Why using bridge rectifiers
+- ESP32-S3 development board with native USB device support.
+- ESP-IDF 5.x environment.
+- Four piezo sensors per drum, eight total for two-player support.
+- Signal conditioning appropriate for piezo sensors and the ESP32-S3 ADC input range.
+- USB cable connected to the ESP32-S3 native USB port.
 
-   Without biasing the voltage of the piezoelectric sensors, their output voltage range is about -5V to +5V. However, the ADCs of the analog inputs only accepts positive voltage values (0-3.3V for ESP32 and 0-5V for ATmega32U4). When they receive a negative voltage, it's simply truncated to 0.
-   
-   It's usually okay for normal electronic drums because we're just losing half of the input energy and it doesn't influence how we calculate the hitting time. But it can cause problems for *taiko* drums, especially with slow processors like ATmega32U4. 
-   
-   In a taiko drum, all the 4 vibrating pieces are connected together, meaning that if you hit left-don, the processor also receives signals from left-kat, right-don, and right-kat. If the left-don piezoelectric sensor generates a negative voltage at the beginning and is truncated by the ADC, it will cause a minor "delay" of about 3 to 4 milliseconds, and the processor could incorrectly treat this hit as a right-don, a left-kat, or even a right-kat, whichever sends a highest positive value.
+Hardware files:
 
-   Using a bridge rectifier, all negative values are converted to positive. In other words, it's like the `abs()` function, ensuring that we don't lose any negative voltages.
+- Project PCB, Gerber archive, and BOM are available in [`PCB/`](./PCB/).
+- 3D printed enclosure/housing is still in progress.
+- Final assembly guide for Taiko Force Lv. 6 style hardware is still in progress.
 
-   ![Why using bridge rectifiers](./images/bridge_signal.png)
+## PCB
 
-# Taiko Controller - Analog Input Mode (Beta)
+The current PCB package is available under [`PCB/`](./PCB/):
 
-With ESP32-S2 or ESP32-S3 controllers, instead of keyboard emulation, the drum controller can work as a gamepad and send its axes values to the game (which also must support analog input). In this way, the game can recognize different force levels of the hit.
+- [`PCB/PCB.png`](./PCB/PCB.png): PCB preview image.
+- [`PCB/Taiko_DMA_PCB.zip`](./PCB/Taiko_DMA_PCB.zip): Gerber production archive.
+- [`PCB/Taiko_DMA_BOM.xlsx`](./PCB/Taiko_DMA_BOM.xlsx): bill of materials spreadsheet.
 
-If you prefer to use the Arduino Micro/Leonardo board, please refer to the [Arduino XInput Library](https://github.com/dmadison/ArduinoXInput) to implement the gamepad.
+![Taiko DMA PCB](./PCB/PCB.png)
 
-## What You Need
+The board is designed around the ESP32-S3-WROOM-1U module and the DMA-based firmware in this repository. Review the BOM and board files before ordering or assembly, especially while the housing and final assembly guide are still in progress.
 
-1. Make your drum or use Taiko Force Lv.5.
+## Build and Flash
 
-2. Flash `ESP32-S3-Analog/ESP32-S3-Analog.ino` to your controller.
+Install and activate ESP-IDF, then build for ESP32-S3:
 
-3. A working ***game***, with these modifications:
+```sh
+idf.py set-target esp32s3
+idf.py build
+idf.py flash monitor
+```
 
-   - Backup and replace the `bnusio.dll` file in the game folder with the one here in the `extra/` folder.
+The project uses ESP-IDF component manager dependencies from [`main/idf_component.yml`](./main/idf_component.yml), including `espressif/esp_tinyusb`.
 
-     This file is compiled from [this fork](https://github.com/ShikyC/TaikoArcadeLoader/tree/Refactor) and you can compile it by yourself if you want.
+The default SDK configuration in [`sdkconfig.defaults`](./sdkconfig.defaults) sets:
 
-     *This modified library only works with a specific game version. If it breaks your game, please clone the original repository, make the corrensponding modifications, and compile it.*
+```ini
+CONFIG_TINYUSB_HID_COUNT=1
+```
 
-   - Open the `gamecontrollerdb.txt` file in the game folder and add one entry under `#Windows`: 
-   
-     `030052a8694800006948000000000000,Taiko Controller,-leftx:-a0,+leftx:+a0,-lefty:-a1,+lefty:+a1,-rightx:-a2,+rightx:+a2,-righty:-a3,+righty:+a3,platform:Windows,`
+## Gamepad Output
 
-     This will tell the game that our ESP32 controller is a gamepad called "Taiko Controller", and map the axis to the standard SDL2 library so that the game can recognize the analog inputs.
+The USB device descriptor is configured as:
 
-   -  Open the `config.toml` file and add the following lines at the end:
-     
-     ```
-     [controller]
-     analog = true
-     ```
+- Manufacturer: `Taiko Community`
+- Product: `Taiko Controller`
+- VID: `0x4869`
+- PID: `0x4869`
 
-     Note that with `analog = true`, all the keyboard drum inputs are disabled. Sorry for this but it need further refactoring to make them work together. If you want to switch back to keyboard inputs, set `analog = false`.
+Current axis mapping:
 
-4. Launch the game and enjoy!
+| Player | Zone | HID output |
+| --- | --- | --- |
+| P1 | Left don | `+X` |
+| P1 | Left kat | `-X` |
+| P1 | Right don | `+Y` |
+| P1 | Right kat | `-Y` |
+| P2 | Left don | `+Rx` |
+| P2 | Left kat | `-Rx` |
+| P2 | Right don | `+Ry` |
+| P2 | Right kat | `-Ry` |
 
-## Online Signal Visualizer Tool
+The firmware also pulses the gamepad Y button once per second so host-side tools can see that the controller is alive even when the drum is idle.
 
-If you find debugging and finding the best sensitivity values very inconvenient with serial port's communications, you can use this [taiko signal visualizer](https://shiky.me/taiko). It's a simple tool I created to show the output of the Taiko Controller (ESP32-Analog version only).
+## Tuning
 
-Just connect the board to the computer (using the USB port, not the serial port) and the waveform will be shown in the graphs. So you don't need to turn on debug mode or using `Serial.print()` command to obtain the values to tune the sensitivities.
+The main tuning constants are currently in [`main/taiko_controller.c`](./main/taiko_controller.c):
 
-### How it works
+- `s_channel_sensitivity`: per-zone multipliers used to normalize piezo response.
+- `POWER_CLAMP`: signal power level that maps to the maximum gamepad axis value.
+- `POWER_RING_SIZE`: number of recent report windows used for peak hold.
+- `PER_CHANNEL_SAMPLE_RATE_HZ`: ADC sampling rate per channel.
+- `USB_REPORT_INTERVAL_US`: HID report interval.
 
-The analog version of the controller simulates as a gamepad and sends the hit force values to the game as the axis values of the left and right joysticks. So with the built-in `Gamepad` API it's very easy to read the values directly. To prevent the tool reading from other gamepads, the controller must be named with `Taiko Controller (Vendor: 4869 Product: 4869)`, so please don't change the `pID` and `vID` values in the firmware.
+The default sensitivity array is:
 
-![Taiko Test Tool](./images/taiko_test.webp)
+```c
+static float s_channel_sensitivity[TOTAL_CHANNELS] = {
+    1.0f, 15.0f, 1.0f, 15.0f,
+    1.0f, 15.0f, 1.0f, 15.0f,
+};
+```
+
+Kat sensors are currently boosted relative to don sensors. You should expect to tune these values for your drum, sensor placement, shell material, and circuit.
+
+## Signal Conditioning Notes
+
+Piezo sensors can produce voltage outside the safe ADC input range. Protect the ESP32-S3 ADC inputs before connecting a drum directly.
+
+The legacy implementation documented bridge rectifiers because raw piezo output can swing negative and lose useful signal when clipped by the ADC. That concern still applies at the hardware level, but the new firmware is centered on high-rate ADC sampling rather than the old Arduino threshold detector.
+
+Even with the PCB package available, treat the wiring and analog front end as experimental until the housing and final assembly guide are finished.
+
+## Repository Layout
+
+```text
+.
+|-- CMakeLists.txt
+|-- sdkconfig.defaults
+|-- dependencies.lock
+|-- main/
+|   |-- CMakeLists.txt
+|   |-- idf_component.yml
+|   `-- taiko_controller.c
+|-- extra/
+|   `-- bnusio.dll
+|-- images/
+|   `-- banner-taiko.png
+|-- PCB/
+|   |-- PCB.png
+|   |-- Taiko_DMA_BOM.xlsx
+|   `-- Taiko_DMA_PCB.zip
+`-- pytest_adc_continuous.py
+```
+
+## Game Integration
+
+The `extra/` directory currently contains a modified `bnusio.dll` carried over from the analog-input workflow. Depending on the game build, you may still need to configure SDL/gamepad mappings so the `Taiko Controller` axes are interpreted as drum input.
+
+The old README included game-specific configuration notes for the previous analog firmware. Those notes are preserved on the `archive-arduino-legacy` branch, but they may not exactly match this refactored HID report layout.
+
+## Testing
+
+[`pytest_adc_continuous.py`](./pytest_adc_continuous.py) is a placeholder for hardware integration testing and is skipped by default because it requires real ESP32-S3 ADC/HID hardware.
+
+For practical testing:
+
+1. Build and flash the firmware.
+2. Confirm the USB device appears as `Taiko Controller`.
+3. Check idle gamepad activity from the pulsed Y button.
+4. Strike each zone and verify the expected axis direction and magnitude.
+5. Tune `s_channel_sensitivity` and `POWER_CLAMP` until all zones respond consistently.
+
+## Roadmap
+
+- Publish 3D printed housing files.
+- Add a finalized Taiko Force Lv. 6 wiring and assembly guide.
+- Add hardware-backed validation for ADC sampling and HID output.
