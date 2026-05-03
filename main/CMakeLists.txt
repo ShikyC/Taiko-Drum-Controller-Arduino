@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "continuous_read_main.c"
-    PRIV_REQUIRES esp_adc esp_timer driver heap
+    SRCS "taiko_controller.c"
     INCLUDE_DIRS "."
-)
+    PRIV_REQUIRES esp_adc esp_timer driver esp_driver_gpio
+    )
