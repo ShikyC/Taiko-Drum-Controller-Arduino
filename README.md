@@ -1,4 +1,4 @@
-> **Legacy implementation archived:** the old Arduino/ATmega32U4 and earlier ESP32 implementation from `master` has reached end of life and is archived on the `archive-arduino-legacy` branch. This branch documents the refactored ESP-IDF implementation.
+> **Legacy implementation archived:** the old Arduino/ATmega32U4 and earlier ESP32 implementation from `master` has reached end of life and is archived on the [`archive-arduino-legacy` branch](https://github.com/ShikyC/Taiko-Drum-Controller-Arduino/tree/archive-arduino-legacy). This branch documents the refactored ESP-IDF implementation.
 
 ![Taiko Drum Controller](./images/banner-taiko.png)
 
