@@ -8,8 +8,6 @@ Open-source firmware and hardware for building a USB taiko drum controller for P
 
 This version is intended for Taiko Force Lv. 6 style drums and other two-player, eight-sensor (1P x 4 + 2P x 4) taiko builds. For Taiko Force Lv. 5 and earlier versions, check the [archived branch](https://github.com/ShikyC/Taiko-Drum-Controller-Arduino/tree/archive-arduino-legacy).
 
-**This project is for personal and non-commercial use only.**
-
 ## Current Status
 
 - [x] Supports Taiko Force Lv. 6 drum wiring through ESP32-S3 ADC continuous mode with DMA.
@@ -102,6 +100,10 @@ The current PCB package is available under [`PCB/`](./PCB/):
 
 The board is designed around the ESP32-S3-WROOM-1U module and the DMA-based firmware in this repository. Review the BOM and board files before ordering or assembly, especially while the housing and final assembly guide are still in progress.
 
+## 3D Printing
+
+The 3MF file is ready to be used with any slicer software and 3D printers. Tested with PLA. Note that for the best result, use 0.2mm nozzle. Larger nozzle can cause some thin walls to be broken.
+
 ## Credits
 
 - The PCB design is based on the open-source ESP32-S3 minimal system board project published on OSHWHub: [esp32s3-zui-xiao-xi-tong-ban-20241211](https://oshwhub.com/sun1053/esp32s3-zui-xiao-xi-tong-ban-20241211).
@@ -191,12 +193,6 @@ Even with the PCB package available, treat the wiring and analog front end as ex
 |   `-- taiko_controller.c
 |-- extra/
 |   `-- bnusio.dll
-|-- images/
-|   `-- banner-taiko.png
-|-- PCB/
-|   |-- PCB.png
-|   |-- Taiko_DMA_BOM.xlsx
-|   `-- Taiko_DMA_PCB.zip
 `-- pytest_adc_continuous.py
 ```
 
