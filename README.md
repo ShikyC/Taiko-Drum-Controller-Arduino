@@ -1,24 +1,23 @@
 > **Legacy implementation archived:** the old Arduino/ATmega32U4 and earlier ESP32 implementation from `master` has reached end of life and is archived on the [`archive-arduino-legacy` branch](https://github.com/ShikyC/Taiko-Drum-Controller-Arduino/tree/archive-arduino-legacy). This branch documents the refactored ESP-IDF implementation.
 
-![Taiko Drum Controller](./images/banner-taiko.png)
+![Taiko Drum Controller](./images/shell.png)
 
 # Taiko Drum Controller - ESP32-S3
 
-Open-source firmware for building a USB taiko drum controller for PC play. The refactored implementation is focused on ESP32-S3, TinyUSB HID gamepad output, and continuous ADC sampling through DMA.
+Open-source firmware and hardware for building a USB taiko drum controller for PC play.
 
-This version is intended for Taiko Force Lv. 6 style drums and other two-player, eight-sensor taiko builds. The older Arduino keyboard/gamepad implementations are no longer maintained in this branch.
+This version is intended for Taiko Force Lv. 6 style drums and other two-player, eight-sensor (1P x 4 + 2P x 4) taiko builds. For Taiko Force Lv. 5 and earlier versions, check the [archived branch](https://github.com/ShikyC/Taiko-Drum-Controller-Arduino/tree/archive-arduino-legacy).
 
 **This project is for personal and non-commercial use only.**
 
 ## Current Status
 
-- Supports Taiko Force Lv. 6 drum wiring through ESP32-S3 ADC continuous mode with DMA.
-- Reports as a USB HID gamepad named `Taiko Controller` with vendor/product ID `0x4869:0x4869`.
-- Samples eight ADC channels, covering two players with four zones each.
-- Sends analog hit strength through gamepad axes instead of keyboard events.
-- Uses ESP-IDF and TinyUSB. Arduino SDK support has been removed.
-- PCB Gerber files and BOM are available in [`PCB/`](./PCB/).
-- 3D printed housing is under construction and will be added when ready.
+- [x] Supports Taiko Force Lv. 6 drum wiring through ESP32-S3 ADC continuous mode with DMA.
+- [x] Supports two players.
+- [x] Sends analog hit strength through gamepad axes instead of keyboard events.
+- [x] PCB Gerber files and BOM are available in [`PCB/`](./PCB/).
+- [x] [3D printed shell](./PCB/3D_Print_Shell.3mf) is ready.
+- [ ] Misc firmware improvements under construction.
 
 ## Hardware Support
 
@@ -206,21 +205,3 @@ Even with the PCB package available, treat the wiring and analog front end as ex
 The `extra/` directory currently contains a modified `bnusio.dll` carried over from the analog-input workflow. Depending on the game build, you may still need to configure SDL/gamepad mappings so the `Taiko Controller` axes are interpreted as drum input.
 
 The old README included game-specific configuration notes for the previous analog firmware. Those notes are preserved on the `archive-arduino-legacy` branch, but they may not exactly match this refactored HID report layout.
-
-## Testing
-
-[`pytest_adc_continuous.py`](./pytest_adc_continuous.py) is a placeholder for hardware integration testing and is skipped by default because it requires real ESP32-S3 ADC/HID hardware.
-
-For practical testing:
-
-1. Build and flash the firmware.
-2. Confirm the USB device appears as `Taiko Controller`.
-3. Check idle gamepad activity from the pulsed Y button.
-4. Strike each zone and verify the expected axis direction and magnitude.
-5. Tune `s_channel_sensitivity` and `POWER_CLAMP` until all zones respond consistently.
-
-## Roadmap
-
-- Publish 3D printed housing files.
-- Add a finalized Taiko Force Lv. 6 wiring and assembly guide.
-- Add hardware-backed validation for ADC sampling and HID output.
