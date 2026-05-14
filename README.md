@@ -79,14 +79,11 @@ If you change pins, use ADC-capable pins for the selected ESP32-S3 board and kee
 - ESP32-S3 development board with native USB device support.
 - ESP-IDF 5.x environment.
 - Four piezo sensors per drum, eight total for two-player support.
-- Signal conditioning appropriate for piezo sensors and the ESP32-S3 ADC input range.
-- USB cable connected to the ESP32-S3 native USB port.
 
 Hardware files:
 
 - Project PCB, Gerber archive, and BOM are available in [`PCB/`](./PCB/).
-- 3D printed enclosure/housing is still in progress.
-- Final assembly guide for Taiko Force Lv. 6 style hardware is still in progress.
+- (Optional) 3D printed shell.
 
 ## PCB
 
@@ -94,7 +91,7 @@ The current PCB package is available under [`PCB/`](./PCB/):
 
 - [`PCB/PCB.png`](./PCB/PCB.png): PCB preview image.
 - [`PCB/Taiko_DMA_PCB.zip`](./PCB/Taiko_DMA_PCB.zip): Gerber production archive.
-- [`PCB/Taiko_DMA_BOM.xlsx`](./PCB/Taiko_DMA_BOM.xlsx): bill of materials spreadsheet.
+- [`PCB/Taiko_DMA_BOM.xlsx`](./PCB/Taiko_DMA_BOM.xlsx): BOM spreadsheet.
 
 ![Taiko DMA PCB](./PCB/PCB.png)
 
@@ -102,12 +99,16 @@ The board is designed around the ESP32-S3-WROOM-1U module and the DMA-based firm
 
 ## 3D Printing
 
-The 3MF file is ready to be used with any slicer software and 3D printers. Tested with PLA. Note that for the best result, use 0.2mm nozzle. Larger nozzle can cause some thin walls to be broken.
+The [shell's 3MF file](./PCB/3D_Print_Shell.3mf) is ready to be used with any slicer software and 3D printers. Tested with PLA. Note that for the best result, use 0.2mm nozzle. Larger nozzle can cause some thin walls to be broken.
 
-## Credits
+To finish the build, in addition to the PCB BOM, you'll need:
 
-- The PCB design is based on the open-source ESP32-S3 minimal system board project published on OSHWHub: [esp32s3-zui-xiao-xi-tong-ban-20241211](https://oshwhub.com/sun1053/esp32s3-zui-xiao-xi-tong-ban-20241211).
-- The ADC DMA implementation is based on Espressif's official ESP-IDF ADC continuous mode example code.
+- M3 countersunk screw x 4
+- M3 heat inserts x 4
+
+An assembled example is shown below.
+
+![Example](./images/components.png)
 
 ## Build and Flash
 
@@ -116,16 +117,27 @@ Install and activate ESP-IDF, then build for ESP32-S3:
 ```sh
 idf.py set-target esp32s3
 idf.py build
-idf.py flash monitor
 ```
 
-The project uses ESP-IDF component manager dependencies from [`main/idf_component.yml`](./main/idf_component.yml), including `espressif/esp_tinyusb`.
-
-The default SDK configuration in [`sdkconfig.defaults`](./sdkconfig.defaults) sets:
+If you see build errors, make sure to set the following [`sdkconfig.defaults`](./sdkconfig.defaults) value:
 
 ```ini
 CONFIG_TINYUSB_HID_COUNT=1
 ```
+
+To enter flashing mode, press and hold the flash button, then plug in the USB cable, and flash the firmware:
+
+```sh
+idf.py flash
+```
+
+After flashing, unplug and replug in the USB cable (without holding the flash button). You will see an HID gamepad called "Taiko Controller" connected.
+
+## Development
+
+For online debugging, use [this tool](https://shiky.me/taiko). For deeper debugging, you'll need an ESP32-S3 development board, as the production PCB lacks the serial port. 
+
+![Online tool](./images/online_tool.png)
 
 ## Gamepad Output
 
@@ -180,23 +192,12 @@ The legacy implementation documented bridge rectifiers because raw piezo output 
 
 Even with the PCB package available, treat the wiring and analog front end as experimental until the housing and final assembly guide are finished.
 
-## Repository Layout
+## Credits
 
-```text
-.
-|-- CMakeLists.txt
-|-- sdkconfig.defaults
-|-- dependencies.lock
-|-- main/
-|   |-- CMakeLists.txt
-|   |-- idf_component.yml
-|   `-- taiko_controller.c
-|-- extra/
-|   `-- bnusio.dll
-`-- pytest_adc_continuous.py
-```
+- The PCB design is based on the open-source ESP32-S3 minimal system board project published on OSHWHub: [esp32s3-zui-xiao-xi-tong-ban-20241211](https://oshwhub.com/sun1053/esp32s3-zui-xiao-xi-tong-ban-20241211).
+- The ADC DMA implementation is based on Espressif's official ESP-IDF ADC continuous mode example code.
 
-## Game Integration
+## Appendix: Game Integration Notes
 
 The `extra/` directory currently contains a modified `bnusio.dll` carried over from the analog-input workflow. Depending on the game build, you may still need to configure SDL/gamepad mappings so the `Taiko Controller` axes are interpreted as drum input.
 
