@@ -199,6 +199,10 @@ Even with the PCB package available, treat the wiring and analog front end as ex
 
 ## Appendix: Game Integration Notes
 
-The `extra/` directory currently contains a modified `bnusio.dll` carried over from the analog-input workflow. Depending on the game build, you may still need to configure SDL/gamepad mappings so the `Taiko Controller` axes are interpreted as drum input.
+You will need a compatible [Taiko Arcade Loader](https://github.com/esuo1198/TaikoArcadeLoader) library to make the controller work with the game instance. After importing the required files, open the `gamecontrollerdb.txt` file and add this following line:
 
-The old README included game-specific configuration notes for the previous analog firmware. Those notes are preserved on the `archive-arduino-legacy` branch, but they may not exactly match this refactored HID report layout.
+```
+030052a8694800006948000000000000,Taiko Controller,-leftx:-a0,+leftx:+a0,-lefty:-a1,+lefty:+a1,-rightx:-a2,+rightx:+a2,-righty:-a3,+righty:+a3,platform:Windows,
+```
+
+Then, open `config.toml`, find the `[controller]` section, set `analog_input = true`. This will disable button input for the game and use analog axes' inputs. Now you can start the game and try out the new controller!
