@@ -4,24 +4,25 @@
 
 # Taiko Drum Controller - ESP32-S3
 
-Open-source firmware and hardware for building a USB taiko drum controller for PC play.
+Open-source firmware and hardware for building a USB taiko drum controller for PC play. Note that this controller **does not support Taiko no Tatsujin: Rhythm Festival** or **TJAPlayer**. This project is intended for Nijiiro-style, arcade-like computers. Full support for Rhythm Festival/TJAPlayer/Nintendo Switch/Playstation 4 is planned.
 
-This version is intended for Taiko Force Lv. 6 style drums and other two-player, eight-sensor (1P x 4 + 2P x 4) taiko builds. For Taiko Force Lv. 5 and earlier versions, check the [archived branch](https://github.com/ShikyC/Taiko-Drum-Controller-Arduino/tree/archive-arduino-legacy).
+This version is intended for Taiko Force Lv. 4/5/6 drums. In theory it works with other custom-made drums, but I haven't done any verification yet.
 
 ## Current Status
 
 - [x] Supports Taiko Force Lv. 6 drum wiring through ESP32-S3 ADC continuous mode with DMA.
-- [x] Processes two players; the current detector is calibrated against 1P data.
+- [x] Processes two players with profiles calibrated against the supplied 1P and 2P captures.
 - [x] Sends analog hit strength through gamepad axes instead of keyboard events.
 - [x] PCB Gerber files and BOM are available in [`PCB/`](./PCB/).
 - [x] [3D printed shell](./PCB/3D_Print_Shell.3mf) is ready.
-- [x] Shows Don, Ka, and overlapping-hit feedback through the shared RGB LED.
+- [x] Shows status with the RGB LED.
+- [ ] Adds buttons for other PC games/Nintendo Switch/Playstation 4 support.
 
 ## Hardware Support
 
 The supported target is **ESP32-S3**.
 
-Other ESP32 variants may work if they support the same ADC continuous mode, DMA behavior, USB device mode, and pin availability, but they are not tested. Arduino boards, ATmega32U4 boards, and non-USB ESP32 development boards are not supported by this refactored firmware.
+Other ESP32 variants may work if they support the same ADC continuous mode, DMA behavior, USB device mode, and pin availability, but they are not tested. Arduino boards, ATmega32U4 boards, and non-USB ESP32 development boards are not supported by this firmware.
 
 ## Firmware Overview
 
@@ -46,16 +47,18 @@ The current sampling model is:
 - conversion spacing: `12 us`
 - `USB_REPORT_INTERVAL_US`: `1000`
 - detector integration and capture latency: about `1.73 ms`
-- output hold and refractory interval: `12 ms`
+- output hold: `12 ms`
+- standard-profile refractory interval: `12 ms`
+- long-tail-profile refractory interval: `72 ms`
 
 Each player has four zones:
 
 1. Left don
-2. Left kat
+2. Left ka
 3. Right don
-4. Right kat
+4. Right ka
 
-Only the strongest zone for each player is emitted in each HID report. Don zones are sent as positive axis values and kat zones are sent as negative axis values.
+Only the strongest zone for each player is emitted in each HID report. Don zones are sent as positive axis values and ka zones are sent as negative axis values.
 
 ## Pin Map
 
@@ -64,13 +67,13 @@ The default ADC pin map uses ADC1 GPIOs on ESP32-S3 and avoids the native USB pi
 | Player | Zone | GPIO |
 | --- | --- | --- |
 | P1 | Left don | 3 |
-| P1 | Left kat | 4 |
+| P1 | Left ka | 4 |
 | P1 | Right don | 5 |
-| P1 | Right kat | 6 |
+| P1 | Right ka | 6 |
 | P2 | Left don | 7 |
-| P2 | Left kat | 8 |
+| P2 | Left ka | 8 |
 | P2 | Right don | 9 |
-| P2 | Right kat | 10 |
+| P2 | Right ka | 10 |
 | Shared | RGB LED data | 38 |
 
 Debug outputs:
@@ -163,13 +166,13 @@ Current axis mapping:
 | Player | Zone | HID output |
 | --- | --- | --- |
 | P1 | Left don | `+X` |
-| P1 | Left kat | `-X` |
+| P1 | Left ka | `-X` |
 | P1 | Right don | `+Y` |
-| P1 | Right kat | `-Y` |
+| P1 | Right ka | `-Y` |
 | P2 | Left don | `+Rx` |
-| P2 | Left kat | `-Rx` |
+| P2 | Left ka | `-Rx` |
 | P2 | Right don | `+Ry` |
-| P2 | Right kat | `-Ry` |
+| P2 | Right ka | `-Ry` |
 
 ## Tuning
 
@@ -181,7 +184,16 @@ Choose the compile-time preset in [`main/taiko_controller.c`](./main/taiko_contr
 
 Available presets are `TAIKO_SENSITIVITY_SENSITIVE`, `TAIKO_SENSITIVITY_BALANCED`, and `TAIKO_SENSITIVITY_FIRM`. They differ in incidental-contact rejection and axis scaling; Balanced is the default. The thresholds and per-channel gains live in [`main/taiko_hit_processor.c`](./main/taiko_hit_processor.c).
 
-Only the 1P detector is currently calibrated. The existing P2 pins run the same processor, but the different P2 drum waveform needs its own capture and calibration before it should be treated as validated.
+Select the standard or long-tail processing profile independently for each drum:
+
+```c
+#define P1_USE_LONG_TAIL_PROFILE false
+#define P2_USE_LONG_TAIL_PROFILE true
+```
+
+The standard profile uses the selected sensitivity preset and a 12 ms refractory interval. The long-tail profile uses firm thresholds and a 72 ms refractory interval so that the noisier decay remains part of the original strike instead of becoming extra hits. The default selects the standard profile for P1 and the long-tail profile for P2. Profile selection only changes each processor's initialization data; it adds no work, task, or synchronization to the real-time ADC loop.
+
+Host replay tested 100 ADC start phases in both supported channel orders. The standard profile recognized all 6,400 phase-augmented 1P hits with no wrong zones, misses, or false positives; the long-tail profile did the same for all 6,400 2P hits. These captures contain isolated strikes. Because the 72 ms interval intentionally limits the long-tail profile to roughly 14 distinct hits per second per player, dense rolls should be recorded and added to the acceptance corpus before reducing it.
 
 ## Signal Conditioning Notes
 
