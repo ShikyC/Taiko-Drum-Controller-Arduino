@@ -25,7 +25,7 @@ Other ESP32 variants may work if they support the same ADC continuous mode, DMA 
 
 ## Firmware Overview
 
-The firmware in [`main/taiko_controller.c`](./main/taiko_controller.c) does six main things:
+The firmware in [`main/taiko_controller.c`](./main/taiko_controller.c) does seven main things:
 
 1. Configures TinyUSB as a HID gamepad.
 2. Configures ADC continuous sampling for eight drum sensor inputs.
@@ -33,6 +33,7 @@ The firmware in [`main/taiko_controller.c`](./main/taiko_controller.c) does six 
 4. Converts raw ADC readings through an eFuse-calibrated millivolt lookup table.
 5. Runs baseline removal, a 0.96 ms RMS window, winner selection, and hit/rearm state through the platform-independent processor in [`main/taiko_hit_processor.c`](./main/taiko_hit_processor.c).
 6. Publishes the winning zone and strength through signed gamepad axes.
+7. Notifies a lower-priority, core-isolated RMT worker that drives the shared hit indicator without blocking ADC processing.
 
 The current sampling model is:
 
@@ -70,6 +71,7 @@ The default ADC pin map uses ADC1 GPIOs on ESP32-S3 and avoids the native USB pi
 | P2 | Left kat | 8 |
 | P2 | Right don | 9 |
 | P2 | Right kat | 10 |
+| Shared | RGB LED data | 38 |
 
 Debug outputs:
 
@@ -79,6 +81,8 @@ Debug outputs:
 | 2 | High when the USB HID host is not ready |
 
 If you change pins, use ADC-capable pins for the selected ESP32-S3 board and keep GPIO 19/20 free for native USB unless your board routes USB differently.
+
+The addressable RGB LED uses 24-bit `GRB` data. Each accepted Don hit holds red for 120 ms and each accepted Ka hit independently holds blue for 120 ms. If those windows overlap across either player, both channels remain active and the LED displays purple.
 
 ## Requirements
 

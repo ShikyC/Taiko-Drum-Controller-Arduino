@@ -13,6 +13,7 @@
 #include "freertos/task.h"
 #include "hal/adc_types.h"
 #include "soc/soc_caps.h"
+#include "taiko_hit_led.h"
 #include "taiko_hit_processor.h"
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
@@ -261,8 +262,11 @@ static void process_complete_adc_scan(const uint16_t scan[TOTAL_CHANNELS]) {
     for (int player = 0; player < PLAYERS; ++player) {
         const uint16_t *player_samples =
             &scan[player * CHANNELS_PER_PLAYER];
-        taiko_hit_processor_push(
-            &s_hit_processors[player], player_samples, NULL);
+        taiko_hit_event_t hit_event;
+        if (taiko_hit_processor_push(
+                &s_hit_processors[player], player_samples, &hit_event)) {
+            taiko_hit_led_notify(hit_event.zone);
+        }
         const taiko_hit_output_t output =
             taiko_hit_processor_get_output(&s_hit_processors[player]);
         __atomic_store_n(
@@ -428,6 +432,9 @@ void app_main(void) {
     for (int player = 0; player < PLAYERS; ++player) {
         taiko_hit_processor_init(&s_hit_processors[player], &hit_config);
     }
+    // The indicator is deliberately optional; ADC and HID operation continues
+    // even if its low-priority worker cannot be created.
+    (void)taiko_hit_led_start();
 
     ESP_ERROR_CHECK(init_adc());
     init_adc_calibration_lut();
