@@ -78,6 +78,7 @@ typedef struct {
 
 taiko_hit_config_t taiko_hit_config_for_sensitivity(
     taiko_sensitivity_t sensitivity);
+taiko_hit_config_t taiko_hit_long_tail_config(void);
 taiko_hit_config_t taiko_hit_default_config(void);
 void taiko_hit_processor_init(taiko_hit_processor_t *processor,
                               const taiko_hit_config_t *config);

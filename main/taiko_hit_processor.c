@@ -6,6 +6,7 @@
 #define Q8_ONE 256U
 #define BASELINE_TRACK_SHIFT 10
 #define BASELINE_TRACK_MARGIN 36U
+#define LONG_TAIL_REFRACTORY_SAMPLES 750U
 
 static uint32_t integer_sqrt_u64(uint64_t value) {
     uint64_t bit = 1ULL << 62;
@@ -86,6 +87,17 @@ taiko_hit_config_t taiko_hit_config_for_sensitivity(
 
 taiko_hit_config_t taiko_hit_default_config(void) {
     return taiko_hit_config_for_sensitivity(TAIKO_SENSITIVITY_BALANCED);
+}
+
+taiko_hit_config_t taiko_hit_long_tail_config(void) {
+    taiko_hit_config_t config =
+        taiko_hit_config_for_sensitivity(TAIKO_SENSITIVITY_FIRM);
+
+    // At 10,416.667 complete scans/s this is 72 ms. The longer interval keeps
+    // a noisy drum's decaying waveform inside the original hit while leaving
+    // the output latch at 12 ms.
+    config.refractory_samples = LONG_TAIL_REFRACTORY_SAMPLES;
+    return config;
 }
 
 void taiko_hit_processor_init(taiko_hit_processor_t *processor,

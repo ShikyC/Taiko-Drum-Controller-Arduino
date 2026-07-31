@@ -53,6 +53,11 @@ enum {
 #define ADC_ATTEN_DB ADC_ATTEN_DB_12
 #define ADC_BIT_WIDTH ADC_BITWIDTH_12
 #define HIT_SENSITIVITY TAIKO_SENSITIVITY_BALANCED
+// Long-tail profile is only needed for old drums like Taiko Force Lv. 5 for
+// backward-compatibility. For newer models like Lv. 6 or other brands, this
+// is not needed.
+#define P1_USE_LONG_TAIL_PROFILE false
+#define P2_USE_LONG_TAIL_PROFILE false
 #define ADC_RAW_LEVELS (1U << 12)
 #define NOMINAL_ADC_FULL_SCALE_MV 3100U
 
@@ -72,6 +77,12 @@ typedef struct __attribute__((packed)) {
 static const int kChannelGpios[TOTAL_CHANNELS] = {
     3, 4, 5, 6,  // P1 L-Don, L-Ka, R-Don, R-Ka
     7, 8, 9, 10  // P2 L-Don, L-Ka, R-Don, R-Ka
+};
+
+// Select the 72 ms tail-suppression profile independently for each drum.
+static const bool kUseLongTailProfile[PLAYERS] = {
+    P1_USE_LONG_TAIL_PROFILE,
+    P2_USE_LONG_TAIL_PROFILE,
 };
 
 static adc_continuous_handle_t s_adc_handle;
@@ -427,9 +438,11 @@ void app_main(void) {
         sizeof(hid_string_descriptor) / sizeof(hid_string_descriptor[0]);
     ESP_ERROR_CHECK(tinyusb_driver_install(&tinyusb_config));
 
-    const taiko_hit_config_t hit_config =
-        taiko_hit_config_for_sensitivity(HIT_SENSITIVITY);
     for (int player = 0; player < PLAYERS; ++player) {
+        const taiko_hit_config_t hit_config =
+            kUseLongTailProfile[player]
+                ? taiko_hit_long_tail_config()
+                : taiko_hit_config_for_sensitivity(HIT_SENSITIVITY);
         taiko_hit_processor_init(&s_hit_processors[player], &hit_config);
     }
     // The indicator is deliberately optional; ADC and HID operation continues
