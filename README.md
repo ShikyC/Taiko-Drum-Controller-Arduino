@@ -15,7 +15,7 @@ This version is intended for Taiko Force Lv. 6 style drums and other two-player,
 - [x] Sends analog hit strength through gamepad axes instead of keyboard events.
 - [x] PCB Gerber files and BOM are available in [`PCB/`](./PCB/).
 - [x] [3D printed shell](./PCB/3D_Print_Shell.3mf) is ready.
-- [ ] Misc firmware improvements under construction.
+- [x] Shows Don, Ka, and overlapping-hit feedback through the shared RGB LED.
 
 ## Hardware Support
 
