@@ -6,12 +6,12 @@
 
 Open-source firmware and hardware for building a USB taiko drum controller for PC play. Note that this controller **does not support Taiko no Tatsujin: Rhythm Festival** or **TJAPlayer**. This project is intended for Nijiiro-style, arcade-like computers. Full support for Rhythm Festival/TJAPlayer/Nintendo Switch/Playstation 4 is planned.
 
-This version is intended for Taiko Force Lv. 4/5/6 drums. In theory it works with other custom-made drums, but I haven't done any verification yet.
+The firmware has been thoroughly tested with Taiko Force Lv. 5 and Lv. 6 drums. In theory, it works with other custom-made drums, but I haven't done any verification yet.
 
 ## Current Status
 
-- [x] Supports Taiko Force Lv. 6 drum wiring through ESP32-S3 ADC continuous mode with DMA.
-- [x] Processes two players with profiles calibrated against the supplied 1P and 2P captures.
+- [x] Supports Taiko Force Lv. 5/6 drum wiring through ESP32-S3 ADC continuous mode with DMA.
+- [x] Processes two players with profiles calibrated against various 1P and 2P captures.
 - [x] Sends analog hit strength through gamepad axes instead of keyboard events.
 - [x] PCB Gerber files and BOM are available in [`PCB/`](./PCB/).
 - [x] [3D printed shell](./PCB/3D_Print_Shell.3mf) is ready.
