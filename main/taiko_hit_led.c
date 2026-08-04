@@ -11,6 +11,7 @@
 #include "freertos/task.h"
 
 #define HIT_LED_GPIO GPIO_NUM_38
+#define HIT_LED_COUNT 8U
 #define HIT_LED_HOLD_MS 120U
 #define HIT_LED_CHANNEL_LEVEL 96U
 #define HIT_LED_RMT_RESOLUTION_HZ 10000000U
@@ -25,17 +26,29 @@
 #define HIT_LED_TASK_CORE 1
 #endif
 
-enum {
-    HIT_LED_EVENT_DON = 1U << 0,
-    HIT_LED_EVENT_KA = 1U << 1,
-};
+#define HIT_LED_EVENT_MASK ((1U << HIT_LED_COUNT) - 1U)
 
 static const char *TAG = "taiko_hit_led";
 static TaskHandle_t s_hit_led_task_handle;
 
-// The supplied XL-5050RGBC-WS2812B datasheet identifies bits by their high
-// time. These values also keep the complete frame near its specified 800 kHz
-// data rate.
+enum {
+    LED_OFFSET_LEFT_KA = 0,
+    LED_OFFSET_LEFT_DON,
+    LED_OFFSET_RIGHT_DON,
+    LED_OFFSET_RIGHT_KA,
+};
+
+// Translate detector zone order (LD, LK, RD, RK) into the physical chain
+// order (LK, LD, RD, RK) used for each player.
+static const uint8_t kLedOffsetByZone[TAIKO_CHANNELS_PER_PLAYER] = {
+    [TAIKO_ZONE_LEFT_DON] = LED_OFFSET_LEFT_DON,
+    [TAIKO_ZONE_LEFT_KA] = LED_OFFSET_LEFT_KA,
+    [TAIKO_ZONE_RIGHT_DON] = LED_OFFSET_RIGHT_DON,
+    [TAIKO_ZONE_RIGHT_KA] = LED_OFFSET_RIGHT_KA,
+};
+
+// The XL-1615RGBC-2812B-S identifies bits by their high time. These values
+// keep the complete frame at its specified 800 kHz data rate.
 static const DRAM_ATTR rmt_symbol_word_t kWs2812Zero = {
     .level0 = 1,
     .duration0 = 3,  // 0.3 us high
@@ -52,9 +65,9 @@ static const DRAM_ATTR rmt_symbol_word_t kWs2812One = {
 
 static const DRAM_ATTR rmt_symbol_word_t kWs2812Reset = {
     .level0 = 0,
-    .duration0 = 500,  // 50 us low
+    .duration0 = 1500,  // 150 us low
     .level1 = 0,
-    .duration1 = 500,  // 50 us low
+    .duration1 = 1500,  // 150 us low; 300 us total reset
 };
 
 static size_t RMT_ENCODER_FUNC_ATTR encode_led_frame(
@@ -84,8 +97,8 @@ static size_t RMT_ENCODER_FUNC_ATTR encode_led_frame(
         return 8;
     }
 
-    // The datasheet asks for at least 100 us low, even though its timing table
-    // separately lists 80 us. Use the stricter value.
+    // Use 300 us low so the latch interval exceeds the selected LED's
+    // greater-than-200-us reset requirement with margin.
     symbols[0] = kWs2812Reset;
     *done = true;
     return 1;
@@ -130,19 +143,29 @@ static esp_err_t init_led_rmt(rmt_channel_handle_t *channel,
     return result;
 }
 
-static esp_err_t write_led_color(rmt_channel_handle_t channel,
+static bool led_is_don(size_t led) {
+    const size_t offset = led % TAIKO_CHANNELS_PER_PLAYER;
+    return offset == LED_OFFSET_LEFT_DON ||
+           offset == LED_OFFSET_RIGHT_DON;
+}
+
+static esp_err_t write_led_frame(rmt_channel_handle_t channel,
                                  rmt_encoder_handle_t encoder,
-                                 uint32_t active_colors) {
-    // The device consumes one pixel as G, R, B, most-significant bit first.
-    const uint8_t grb[3] = {
-        0,
-        (active_colors & HIT_LED_EVENT_DON) != 0
-            ? HIT_LED_CHANNEL_LEVEL
-            : 0,
-        (active_colors & HIT_LED_EVENT_KA) != 0
-            ? HIT_LED_CHANNEL_LEVEL
-            : 0,
-    };
+                                 uint32_t active_channels) {
+    // Each player uses physical order LK, LD, RD, RK. Each device consumes G,
+    // R, B, most-significant bit first. Only one color component is ever set:
+    // Don is clean red and Ka is clean blue, never a combined purple value.
+    uint8_t grb[HIT_LED_COUNT * 3U] = {0};
+    for (size_t led = 0; led < HIT_LED_COUNT; ++led) {
+        if ((active_channels & (1U << led)) == 0) {
+            continue;
+        }
+        if (led_is_don(led)) {
+            grb[led * 3U + 1U] = HIT_LED_CHANNEL_LEVEL;
+        } else {
+            grb[led * 3U + 2U] = HIT_LED_CHANNEL_LEVEL;
+        }
+    }
     const rmt_transmit_config_t transmit_config = {
         .loop_count = 0,
         .flags = {
@@ -163,19 +186,18 @@ static bool deadline_reached(TickType_t now, TickType_t deadline) {
     return (int32_t)(now - deadline) >= 0;
 }
 
-static TickType_t next_deadline_wait(TickType_t now,
-                                     bool don_active,
-                                     TickType_t don_until,
-                                     bool ka_active,
-                                     TickType_t ka_until) {
+static TickType_t next_deadline_wait(
+    TickType_t now,
+    uint32_t active_channels,
+    const TickType_t active_until[HIT_LED_COUNT]) {
     TickType_t wait = portMAX_DELAY;
-    if (don_active) {
-        wait = don_until - now;
-    }
-    if (ka_active) {
-        const TickType_t ka_wait = ka_until - now;
-        if (wait == portMAX_DELAY || ka_wait < wait) {
-            wait = ka_wait;
+    for (size_t led = 0; led < HIT_LED_COUNT; ++led) {
+        if ((active_channels & (1U << led)) == 0) {
+            continue;
+        }
+        const TickType_t led_wait = active_until[led] - now;
+        if (wait == portMAX_DELAY || led_wait < wait) {
+            wait = led_wait;
         }
     }
     return wait == 0 ? 1 : wait;
@@ -197,47 +219,43 @@ static void hit_led_task(void *argument) {
         return;
     }
 
-    bool don_active = false;
-    bool ka_active = false;
-    TickType_t don_until = 0;
-    TickType_t ka_until = 0;
-    uint32_t displayed_colors = UINT32_MAX;
+    TickType_t active_until[HIT_LED_COUNT] = {0};
+    uint32_t active_channels = 0;
+    uint32_t displayed_channels = UINT32_MAX;
     uint32_t events = 0;
     const TickType_t hold_ticks = pdMS_TO_TICKS(HIT_LED_HOLD_MS);
 
     while (true) {
         const TickType_t now = xTaskGetTickCount();
-        if ((events & HIT_LED_EVENT_DON) != 0) {
-            don_active = true;
-            don_until = now + hold_ticks;
-        }
-        if ((events & HIT_LED_EVENT_KA) != 0) {
-            ka_active = true;
-            ka_until = now + hold_ticks;
-        }
-
-        if (don_active && deadline_reached(now, don_until)) {
-            don_active = false;
-        }
-        if (ka_active && deadline_reached(now, ka_until)) {
-            ka_active = false;
+        events &= HIT_LED_EVENT_MASK;
+        for (size_t led = 0; led < HIT_LED_COUNT; ++led) {
+            const uint32_t led_mask = 1U << led;
+            if ((events & led_mask) != 0) {
+                active_channels |= led_mask;
+                active_until[led] = now + hold_ticks;
+            }
         }
 
-        const uint32_t active_colors =
-            (don_active ? HIT_LED_EVENT_DON : 0) |
-            (ka_active ? HIT_LED_EVENT_KA : 0);
-        if (active_colors != displayed_colors) {
+        for (size_t led = 0; led < HIT_LED_COUNT; ++led) {
+            const uint32_t led_mask = 1U << led;
+            if ((active_channels & led_mask) != 0 &&
+                deadline_reached(now, active_until[led])) {
+                active_channels &= ~led_mask;
+            }
+        }
+
+        if (active_channels != displayed_channels) {
             const esp_err_t write_result =
-                write_led_color(channel, encoder, active_colors);
+                write_led_frame(channel, encoder, active_channels);
             if (write_result != ESP_OK) {
-                ESP_LOGW(TAG, "color update failed: %s",
+                ESP_LOGW(TAG, "channel update failed: %s",
                          esp_err_to_name(write_result));
             }
-            displayed_colors = active_colors;
+            displayed_channels = active_channels;
         }
 
-        const TickType_t wait = next_deadline_wait(
-            now, don_active, don_until, ka_active, ka_until);
+        const TickType_t wait =
+            next_deadline_wait(now, active_channels, active_until);
         events = 0;
         (void)xTaskNotifyWait(0, UINT32_MAX, &events, wait);
     }
@@ -260,22 +278,19 @@ esp_err_t taiko_hit_led_start(void) {
     return ESP_OK;
 }
 
-void taiko_hit_led_notify(taiko_zone_t zone) {
-    uint32_t event = 0;
-    switch (zone) {
-        case TAIKO_ZONE_LEFT_DON:
-        case TAIKO_ZONE_RIGHT_DON:
-            event = HIT_LED_EVENT_DON;
-            break;
-        case TAIKO_ZONE_LEFT_KA:
-        case TAIKO_ZONE_RIGHT_KA:
-            event = HIT_LED_EVENT_KA;
-            break;
+void taiko_hit_led_notify(int player, taiko_zone_t zone) {
+    if (player < 0 || player >= 2 || zone < TAIKO_ZONE_LEFT_DON ||
+        zone > TAIKO_ZONE_RIGHT_KA) {
+        return;
     }
+    const uint32_t led =
+        (uint32_t)player * TAIKO_CHANNELS_PER_PLAYER +
+        kLedOffsetByZone[(size_t)zone];
+    const uint32_t event = 1U << led;
 
     const TaskHandle_t task = __atomic_load_n(
         &s_hit_led_task_handle, __ATOMIC_ACQUIRE);
-    if (event != 0 && task != NULL) {
+    if (task != NULL) {
         (void)xTaskNotify(task, event, eSetBits);
     }
 }

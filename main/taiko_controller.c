@@ -1,4 +1,5 @@
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -8,6 +9,7 @@
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_adc/adc_continuous.h"
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -17,9 +19,6 @@
 #include "taiko_hit_processor.h"
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
-
-#define DEBUG_PIN_1 GPIO_NUM_1  // HIGH on ADC DMA/read error
-#define DEBUG_PIN_2 GPIO_NUM_2  // HIGH while the USB HID host is not ready
 
 /************* TinyUSB descriptors ****************/
 
@@ -34,6 +33,87 @@ enum {
 #define USB_VID 0x4869
 #define USB_PID 0x4869
 #define USB_REPORT_INTERVAL_US 1000
+
+/************* V2 digital controls ****************/
+
+#define BUTTON_DEBOUNCE_REPORTS 5U
+#define DIP_SETTLE_MS 5U
+
+typedef enum {
+    INPUT_DPAD_UP = 0,
+    INPUT_DPAD_RIGHT,
+    INPUT_DPAD_DOWN,
+    INPUT_DPAD_LEFT,
+    INPUT_FACE_UP,
+    INPUT_FACE_RIGHT,
+    INPUT_FACE_DOWN,
+    INPUT_FACE_LEFT,
+    INPUT_L1,
+    INPUT_R1,
+    INPUT_L2,
+    INPUT_R2,
+    INPUT_SELECT,
+    INPUT_START,
+    INPUT_HOME,
+    CONTROLLER_INPUT_COUNT,
+} controller_input_t;
+
+typedef enum {
+    CONTROLLER_MODE_ARCADE = 0,
+    CONTROLLER_MODE_PC,
+    CONTROLLER_MODE_SWITCH,
+    CONTROLLER_MODE_PS4,
+} controller_mode_t;
+
+typedef struct {
+    bool stable_pressed;
+    bool candidate_pressed;
+    uint8_t candidate_reports;
+} button_filter_t;
+
+static const gpio_num_t kControllerInputGpios[CONTROLLER_INPUT_COUNT] = {
+    GPIO_NUM_11,  // D-pad up
+    GPIO_NUM_12,  // D-pad right
+    GPIO_NUM_13,  // D-pad down
+    GPIO_NUM_14,  // D-pad left
+    GPIO_NUM_15,  // Face up / north
+    GPIO_NUM_16,  // Face right / east
+    GPIO_NUM_17,  // Face down / south
+    GPIO_NUM_18,  // Face left / west
+    GPIO_NUM_47,  // L1
+    GPIO_NUM_48,  // R1
+    GPIO_NUM_1,   // L2
+    GPIO_NUM_2,   // R2
+    GPIO_NUM_43,  // Select; UART0 console is disabled in sdkconfig.defaults
+    GPIO_NUM_44,  // Start
+    GPIO_NUM_0,   // Home at runtime; BOOT when held during power-on
+};
+
+static const gpio_num_t kDipGpios[4] = {
+    GPIO_NUM_39,
+    GPIO_NUM_40,
+    GPIO_NUM_41,
+    GPIO_NUM_42,
+};
+
+#define CONTROLLER_INPUT_MASK                                                \
+    ((1ULL << GPIO_NUM_0) | (1ULL << GPIO_NUM_1) |                           \
+     (1ULL << GPIO_NUM_2) | (1ULL << GPIO_NUM_11) |                          \
+     (1ULL << GPIO_NUM_12) | (1ULL << GPIO_NUM_13) |                         \
+     (1ULL << GPIO_NUM_14) | (1ULL << GPIO_NUM_15) |                         \
+     (1ULL << GPIO_NUM_16) | (1ULL << GPIO_NUM_17) |                         \
+     (1ULL << GPIO_NUM_18) | (1ULL << GPIO_NUM_43) |                         \
+     (1ULL << GPIO_NUM_44) | (1ULL << GPIO_NUM_47) |                         \
+     (1ULL << GPIO_NUM_48))
+
+#define DIP_INPUT_MASK                                                       \
+    ((1ULL << GPIO_NUM_39) | (1ULL << GPIO_NUM_40) |                         \
+     (1ULL << GPIO_NUM_41) | (1ULL << GPIO_NUM_42))
+
+#define DIP_P1_LONG_TAIL (1U << 0)
+#define DIP_P2_LONG_TAIL (1U << 1)
+#define DIP_MODE_SHIFT 2U
+#define DIP_MODE_MASK 0x03U
 
 /************* ADC and detector configuration ****************/
 
@@ -53,11 +133,6 @@ enum {
 #define ADC_ATTEN_DB ADC_ATTEN_DB_12
 #define ADC_BIT_WIDTH ADC_BITWIDTH_12
 #define HIT_SENSITIVITY TAIKO_SENSITIVITY_BALANCED
-// Long-tail profile is only needed for old drums like Taiko Force Lv. 5 for
-// backward-compatibility. For newer models like Lv. 6 or other brands, this
-// is not needed.
-#define P1_USE_LONG_TAIL_PROFILE false
-#define P2_USE_LONG_TAIL_PROFILE false
 #define ADC_RAW_LEVELS (1U << 12)
 #define NOMINAL_ADC_FULL_SCALE_MV 3100U
 
@@ -79,12 +154,7 @@ static const int kChannelGpios[TOTAL_CHANNELS] = {
     7, 8, 9, 10  // P2 L-Don, L-Ka, R-Don, R-Ka
 };
 
-// Select the 72 ms tail-suppression profile independently for each drum.
-static const bool kUseLongTailProfile[PLAYERS] = {
-    P1_USE_LONG_TAIL_PROFILE,
-    P2_USE_LONG_TAIL_PROFILE,
-};
-
+static const char *TAG = "taiko_controller";
 static adc_continuous_handle_t s_adc_handle;
 static TaskHandle_t s_adc_task_handle;
 static int8_t s_pattern_slot_by_adc_channel[SOC_ADC_CHANNEL_NUM(0)];
@@ -92,6 +162,9 @@ static volatile bool s_adc_pool_overflow;
 static taiko_hit_processor_t s_hit_processors[PLAYERS];
 static uint32_t s_published_outputs[PLAYERS];
 static uint16_t s_adc_millivolts[ADC_RAW_LEVELS];
+static button_filter_t s_button_filters[CONTROLLER_INPUT_COUNT];
+static uint8_t s_dip_switches;
+static controller_mode_t s_controller_mode;
 
 static const uint8_t hid_report_descriptor[] = {
     TUD_HID_REPORT_DESC_GAMEPAD(HID_REPORT_ID(0x01))
@@ -155,6 +228,170 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
     (void)report_type;
     (void)buffer;
     (void)bufsize;
+}
+
+/********* V2 digital controls ***************/
+
+static bool read_active_low(gpio_num_t gpio) {
+    return gpio_get_level(gpio) == 0;
+}
+
+static uint8_t read_dip_switches(void) {
+    uint8_t switches = 0;
+    for (size_t index = 0; index < sizeof(kDipGpios) / sizeof(kDipGpios[0]);
+         ++index) {
+        if (read_active_low(kDipGpios[index])) {
+            switches |= (uint8_t)(1U << index);
+        }
+    }
+    return switches;
+}
+
+static void initialize_button_filters(void) {
+    for (size_t index = 0; index < CONTROLLER_INPUT_COUNT; ++index) {
+        const bool pressed = read_active_low(kControllerInputGpios[index]);
+        s_button_filters[index] = (button_filter_t){
+            .stable_pressed = pressed,
+            .candidate_pressed = pressed,
+            .candidate_reports = BUTTON_DEBOUNCE_REPORTS,
+        };
+    }
+}
+
+static void sample_button_filters(void) {
+    for (size_t index = 0; index < CONTROLLER_INPUT_COUNT; ++index) {
+        button_filter_t *filter = &s_button_filters[index];
+        const bool pressed = read_active_low(kControllerInputGpios[index]);
+        if (pressed != filter->candidate_pressed) {
+            filter->candidate_pressed = pressed;
+            filter->candidate_reports = 1;
+            continue;
+        }
+        if (filter->candidate_reports < BUTTON_DEBOUNCE_REPORTS) {
+            filter->candidate_reports++;
+        }
+        if (filter->candidate_reports >= BUTTON_DEBOUNCE_REPORTS) {
+            filter->stable_pressed = filter->candidate_pressed;
+        }
+    }
+}
+
+static bool button_pressed(controller_input_t input) {
+    return s_button_filters[input].stable_pressed;
+}
+
+static uint8_t build_hat_value(void) {
+    bool up = button_pressed(INPUT_DPAD_UP);
+    bool right = button_pressed(INPUT_DPAD_RIGHT);
+    bool down = button_pressed(INPUT_DPAD_DOWN);
+    bool left = button_pressed(INPUT_DPAD_LEFT);
+
+    // Opposite directions cancel each other instead of producing an invalid
+    // hat value.
+    if (up && down) {
+        up = false;
+        down = false;
+    }
+    if (left && right) {
+        left = false;
+        right = false;
+    }
+
+    if (up) {
+        if (right) {
+            return GAMEPAD_HAT_UP_RIGHT;
+        }
+        if (left) {
+            return GAMEPAD_HAT_UP_LEFT;
+        }
+        return GAMEPAD_HAT_UP;
+    }
+    if (down) {
+        if (right) {
+            return GAMEPAD_HAT_DOWN_RIGHT;
+        }
+        if (left) {
+            return GAMEPAD_HAT_DOWN_LEFT;
+        }
+        return GAMEPAD_HAT_DOWN;
+    }
+    if (right) {
+        return GAMEPAD_HAT_RIGHT;
+    }
+    if (left) {
+        return GAMEPAD_HAT_LEFT;
+    }
+    return GAMEPAD_HAT_CENTERED;
+}
+
+static uint32_t build_button_bitmap(void) {
+    uint32_t buttons = 0;
+    if (button_pressed(INPUT_FACE_DOWN)) {
+        buttons |= GAMEPAD_BUTTON_SOUTH;
+    }
+    if (button_pressed(INPUT_FACE_RIGHT)) {
+        buttons |= GAMEPAD_BUTTON_EAST;
+    }
+    if (button_pressed(INPUT_FACE_UP)) {
+        buttons |= GAMEPAD_BUTTON_NORTH;
+    }
+    if (button_pressed(INPUT_FACE_LEFT)) {
+        buttons |= GAMEPAD_BUTTON_WEST;
+    }
+    if (button_pressed(INPUT_L1)) {
+        buttons |= GAMEPAD_BUTTON_TL;
+    }
+    if (button_pressed(INPUT_R1)) {
+        buttons |= GAMEPAD_BUTTON_TR;
+    }
+    if (button_pressed(INPUT_L2)) {
+        buttons |= GAMEPAD_BUTTON_TL2;
+    }
+    if (button_pressed(INPUT_R2)) {
+        buttons |= GAMEPAD_BUTTON_TR2;
+    }
+    if (button_pressed(INPUT_SELECT)) {
+        buttons |= GAMEPAD_BUTTON_SELECT;
+    }
+    if (button_pressed(INPUT_START)) {
+        buttons |= GAMEPAD_BUTTON_START;
+    }
+    if (button_pressed(INPUT_HOME)) {
+        buttons |= GAMEPAD_BUTTON_MODE;
+    }
+    return buttons;
+}
+
+static void initialize_board_inputs(void) {
+    const gpio_config_t input_config = {
+        .pin_bit_mask = CONTROLLER_INPUT_MASK | DIP_INPUT_MASK,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&input_config));
+
+    // All controls have external 10 kOhm pull-ups. This short delay lets the
+    // four static DIP levels settle before they select detector profiles.
+    vTaskDelay(pdMS_TO_TICKS(DIP_SETTLE_MS));
+    s_dip_switches = read_dip_switches();
+    initialize_button_filters();
+
+    static const char *const mode_names[] = {
+        "Arcade",
+        "PC",
+        "Nintendo Switch",
+        "PS4",
+    };
+    s_controller_mode = (controller_mode_t)(
+        (s_dip_switches >> DIP_MODE_SHIFT) & DIP_MODE_MASK);
+    ESP_LOGI(TAG,
+             "DIP: P1 long-tail=%s, P2 long-tail=%s, mode=%s "
+             "(generic HID transport)",
+             (s_dip_switches & DIP_P1_LONG_TAIL) != 0 ? "on" : "off",
+             (s_dip_switches & DIP_P2_LONG_TAIL) != 0 ? "on" : "off",
+             mode_names[s_controller_mode]);
 }
 
 /********* ADC continuous sampling ***************/
@@ -276,7 +513,7 @@ static void process_complete_adc_scan(const uint16_t scan[TOTAL_CHANNELS]) {
         taiko_hit_event_t hit_event;
         if (taiko_hit_processor_push(
                 &s_hit_processors[player], player_samples, &hit_event)) {
-            taiko_hit_led_notify(hit_event.zone);
+            taiko_hit_led_notify(player, hit_event.zone);
         }
         const taiko_hit_output_t output =
             taiko_hit_processor_get_output(&s_hit_processors[player]);
@@ -290,7 +527,7 @@ static void adc_reader_task(void *argument) {
     uint8_t *raw = heap_caps_malloc(
         DMA_FRAME_BYTES, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
     if (raw == NULL) {
-        gpio_set_level(DEBUG_PIN_1, 1);
+        ESP_LOGE(TAG, "ADC DMA read buffer allocation failed");
         vTaskDelete(NULL);
         return;
     }
@@ -302,7 +539,7 @@ static void adc_reader_task(void *argument) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         if (__atomic_exchange_n(
                 &s_adc_pool_overflow, false, __ATOMIC_ACQ_REL)) {
-            gpio_set_level(DEBUG_PIN_1, 1);
+            ESP_LOGW(TAG, "ADC DMA pool overflow");
         }
 
         bool first_read = true;
@@ -317,11 +554,10 @@ static void adc_reader_task(void *argument) {
                 break;
             }
             if (result != ESP_OK) {
-                gpio_set_level(DEBUG_PIN_1, 1);
+                ESP_LOGE(TAG, "ADC read failed: %s", esp_err_to_name(result));
                 expected_slot = 0;
                 break;
             }
-            gpio_set_level(DEBUG_PIN_1, 0);
 
             const adc_digi_output_data_t *items =
                 (const adc_digi_output_data_t *)raw;
@@ -392,7 +628,10 @@ static void apply_player_output(
 }
 
 static taiko_hid_report_t build_hid_report(void) {
-    taiko_hid_report_t report = {0};
+    taiko_hid_report_t report = {
+        .hat = build_hat_value(),
+        .buttons = build_button_bitmap(),
+    };
     for (int player = 0; player < PLAYERS; ++player) {
         const uint32_t encoded = __atomic_load_n(
             &s_published_outputs[player], __ATOMIC_ACQUIRE);
@@ -403,6 +642,7 @@ static taiko_hid_report_t build_hid_report(void) {
 
 static void hid_report_timer_cb(void *argument) {
     (void)argument;
+    sample_button_filters();
     if (!tud_mounted()) {
         return;
     }
@@ -411,7 +651,6 @@ static void hid_report_timer_cb(void *argument) {
     }
 
     const bool host_ready = tud_hid_ready();
-    gpio_set_level(DEBUG_PIN_2, host_ready ? 0 : 1);
     if (host_ready) {
         const taiko_hid_report_t report = build_hid_report();
         tud_hid_report(0x01, &report, sizeof(report));
@@ -419,15 +658,7 @@ static void hid_report_timer_cb(void *argument) {
 }
 
 void app_main(void) {
-    const gpio_config_t debug_gpio_config = {
-        .pin_bit_mask =
-            (1ULL << DEBUG_PIN_1) | (1ULL << DEBUG_PIN_2),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    ESP_ERROR_CHECK(gpio_config(&debug_gpio_config));
+    initialize_board_inputs();
 
     tinyusb_config_t tinyusb_config = TINYUSB_DEFAULT_CONFIG();
     tinyusb_config.descriptor.device = &device_descriptor;
@@ -439,8 +670,10 @@ void app_main(void) {
     ESP_ERROR_CHECK(tinyusb_driver_install(&tinyusb_config));
 
     for (int player = 0; player < PLAYERS; ++player) {
+        const uint8_t profile_switch =
+            player == 0 ? DIP_P1_LONG_TAIL : DIP_P2_LONG_TAIL;
         const taiko_hit_config_t hit_config =
-            kUseLongTailProfile[player]
+            (s_dip_switches & profile_switch) != 0
                 ? taiko_hit_long_tail_config()
                 : taiko_hit_config_for_sensitivity(HIT_SENSITIVITY);
         taiko_hit_processor_init(&s_hit_processors[player], &hit_config);

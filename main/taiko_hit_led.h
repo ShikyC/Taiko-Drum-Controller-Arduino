@@ -7,14 +7,15 @@
 extern "C" {
 #endif
 
-// Starts the low-priority GPIO 38 indicator worker. LED failure is isolated
-// from hit detection, so callers may continue operating if this returns an
-// error.
+// Starts the low-priority GPIO 38 worker for the eight-pixel channel chain.
+// LED failure is isolated from hit detection, so callers may continue
+// operating if this returns an error.
 esp_err_t taiko_hit_led_start(void);
 
-// Nonblocking notification for a hit accepted by the detector. Don and Ka
-// use independent hold windows; when both are active the shared LED is purple.
-void taiko_hit_led_notify(taiko_zone_t zone);
+// Nonblocking notification for a hit accepted by the detector. Each player's
+// physical chain order is left Ka, left Don, right Don, right Ka. Every pixel
+// has an independent hold window and uses only red (Don) or blue (Ka).
+void taiko_hit_led_notify(int player, taiko_zone_t zone);
 
 #ifdef __cplusplus
 }

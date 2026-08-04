@@ -15,8 +15,12 @@ The firmware has been thoroughly tested with Taiko Force Lv. 5 and Lv. 6 drums. 
 - [x] Sends analog hit strength through gamepad axes instead of keyboard events.
 - [x] PCB Gerber files and BOM are available in [`PCB/`](./PCB/).
 - [x] [3D printed shell](./PCB/3D_Print_Shell.3mf) is ready.
-- [x] Shows status with the RGB LED.
-- [ ] Adds buttons for other PC games/Nintendo Switch/Playstation 4 support.
+- [x] Shows each accepted sensor channel with its own addressable RGB LED.
+- [x] Reads the V2 D-pad, face, shoulder, trigger, menu, and Home buttons as a
+  debounced generic HID gamepad.
+- [ ] Adds the console-specific Nintendo Switch and PlayStation 4 USB
+  protocols. The mode DIP value is decoded, but those transports are not
+  falsely advertised by the current generic-HID firmware.
 
 ## Hardware Support
 
@@ -34,7 +38,9 @@ The firmware in [`main/taiko_controller.c`](./main/taiko_controller.c) does seve
 4. Converts raw ADC readings through an eFuse-calibrated millivolt lookup table.
 5. Runs baseline removal, a 0.96 ms RMS window, winner selection, and hit/rearm state through the platform-independent processor in [`main/taiko_hit_processor.c`](./main/taiko_hit_processor.c).
 6. Publishes the winning zone and strength through signed gamepad axes.
-7. Notifies a lower-priority, core-isolated RMT worker that drives the shared hit indicator without blocking ADC processing.
+7. Polls and debounces the digital controls at the HID report cadence and
+   notifies a lower-priority, core-isolated RMT worker that drives eight
+   independent channel indicators without blocking ADC processing.
 
 The current sampling model is:
 
@@ -74,18 +80,59 @@ The default ADC pin map uses ADC1 GPIOs on ESP32-S3 and avoids the native USB pi
 | P2 | Left ka | 8 |
 | P2 | Right don | 9 |
 | P2 | Right ka | 10 |
-| Shared | RGB LED data | 38 |
+| Shared | Eight-pixel RGB chain data | 38 |
 
-Debug outputs:
+V2 digital controls are active-low and use the individual external 10 kOhm
+pull-ups shown in the schematic:
 
-| GPIO | Meaning |
-| --- | --- |
-| 1 | High when the ADC DMA pool overflows or an ADC read fails |
-| 2 | High when the USB HID host is not ready |
+| Control | GPIO | Generic HID output |
+| --- | ---: | --- |
+| D-pad up/right/down/left | 11/12/13/14 | Hat switch |
+| Face up/right/down/left | 15/16/17/18 | North/east/south/west |
+| L1/R1 | 47/48 | TL/TR |
+| L2/R2 | 1/2 | TL2/TR2 |
+| Select/Start | 43/44 | Select/Start |
+| Home/BOOT | 0 | Mode during normal runtime; download boot when held during power-on |
+
+GPIO43 is reclaimed from UART0 after boot, so the application and bootloader
+console outputs are disabled in [`sdkconfig.defaults`](./sdkconfig.defaults).
+The immutable ESP32-S3 ROM can still briefly use TXD0 during reset; the board's
+normal usage contract is therefore to leave Select released while plugging in.
+
+The four active-low DIP poles are sampled once during startup:
+
+| DIP | GPIO | ON behavior |
+| --- | ---: | --- |
+| 1 | 39 | P1 72 ms long-tail detector profile |
+| 2 | 40 | P2 72 ms long-tail detector profile |
+| 3 | 41 | Mode bit 0 |
+| 4 | 42 | Mode bit 1 |
+
+Mode bits are ordered as `DIP4:DIP3`: `00` Arcade, `01` PC, `10` Nintendo
+Switch, and `11` PS4. The current firmware latches that selection while using
+the existing generic HID descriptor in every position; console-specific USB
+descriptors and reports are a separate implementation step.
 
 If you change pins, use ADC-capable pins for the selected ESP32-S3 board and keep GPIO 19/20 free for native USB unless your board routes USB differently.
 
-The addressable RGB LED uses 24-bit `GRB` data. Each accepted Don hit holds red for 120 ms and each accepted Ka hit independently holds blue for 120 ms. If those windows overlap across either player, both channels remain active and the LED displays purple.
+The addressable RGB chain uses 24-bit `GRB` data per pixel. Its physical order
+and fixed hit colors are:
+
+| Pixel | Hit channel | Color |
+| --- | --- | --- |
+| LED2 | P1 left Ka | Blue |
+| LED3 | P1 left Don | Red |
+| LED4 | P1 right Don | Red |
+| LED5 | P1 right Ka | Blue |
+| LED6 | P2 left Ka | Blue |
+| LED7 | P2 left Don | Red |
+| LED8 | P2 right Don | Red |
+| LED9 | P2 right Ka | Blue |
+
+Each accepted hit holds only its own pixel for 120 ms. A Don sets only the red
+component and a Ka sets only the blue component, so no purple signal is sent;
+simultaneous hits across any P1/P2 channels remain independent. This LED order
+does not change the ADC input order.
 
 ## Requirements
 
@@ -138,13 +185,16 @@ If you see build errors, make sure to set the following [`sdkconfig.defaults`](.
 CONFIG_TINYUSB_HID_COUNT=1
 ```
 
-To enter flashing mode, press and hold the flash button, then plug in the USB cable, and flash the firmware:
+To enter flashing mode on the V2 board, press and hold Home/BOOT, then plug in
+the USB cable. The button directly pulls GPIO0 low; no inverter is required.
+Then flash the firmware:
 
 ```sh
 idf.py flash
 ```
 
-After flashing, unplug and replug in the USB cable (without holding the flash button). You will see an HID gamepad called "Taiko Controller" connected.
+After flashing, unplug and replug the USB cable without holding Home/BOOT. You
+will see an HID gamepad called "Taiko Controller" connected.
 
 ## Development
 
@@ -174,6 +224,20 @@ Current axis mapping:
 | P2 | Right don | `+Ry` |
 | P2 | Right ka | `-Ry` |
 
+Digital control mapping:
+
+| Physical control | HID control |
+| --- | --- |
+| D-pad | Eight-way hat, with opposite directions cancelling |
+| Face down/right/up/left | South/east/north/west |
+| L1/R1 | TL/TR |
+| L2/R2 | TL2/TR2 |
+| Select/Start | Select/Start |
+| Home | Mode |
+
+Buttons require five consecutive 1 ms samples before a transition is
+published. They are ordinary GPIO reads and do not consume ADC conversions.
+
 ## Tuning
 
 Choose the compile-time preset in [`main/taiko_controller.c`](./main/taiko_controller.c):
@@ -184,14 +248,17 @@ Choose the compile-time preset in [`main/taiko_controller.c`](./main/taiko_contr
 
 Available presets are `TAIKO_SENSITIVITY_SENSITIVE`, `TAIKO_SENSITIVITY_BALANCED`, and `TAIKO_SENSITIVITY_FIRM`. They differ in incidental-contact rejection and axis scaling; Balanced is the default. The thresholds and per-channel gains live in [`main/taiko_hit_processor.c`](./main/taiko_hit_processor.c).
 
-Select the standard or long-tail processing profile independently for each drum:
+Select the standard or long-tail processing profile independently with DIP1
+for P1 and DIP2 for P2. An open/OFF pole selects the standard profile; ON
+selects long-tail.
 
-```c
-#define P1_USE_LONG_TAIL_PROFILE false
-#define P2_USE_LONG_TAIL_PROFILE true
-```
-
-The standard profile uses the selected sensitivity preset and a 12 ms refractory interval. The long-tail profile uses firm thresholds and a 72 ms refractory interval so that the noisier decay remains part of the original strike instead of becoming extra hits. The default selects the standard profile for P1 and the long-tail profile for P2. Profile selection only changes each processor's initialization data; it adds no work, task, or synchronization to the real-time ADC loop.
+The standard profile uses the selected sensitivity preset and a 12 ms
+refractory interval. The long-tail profile uses firm thresholds and a 72 ms
+refractory interval so that the noisier decay remains part of the original
+strike instead of becoming extra hits. The DIP values are latched before the
+processors start. Profile selection only changes each processor's
+initialization data; it adds no work, task, or synchronization to the
+real-time ADC loop.
 
 Host replay tested 100 ADC start phases in both supported channel orders. The standard profile recognized all 6,400 phase-augmented 1P hits with no wrong zones, misses, or false positives; the long-tail profile did the same for all 6,400 2P hits. These captures contain isolated strikes. Because the 72 ms interval intentionally limits the long-tail profile to roughly 14 distinct hits per second per player, dense rolls should be recorded and added to the acceptance corpus before reducing it.
 
