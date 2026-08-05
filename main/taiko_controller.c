@@ -3,7 +3,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "class/hid/hid_device.h"
 #include "driver/gpio.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
@@ -17,21 +16,9 @@
 #include "soc/soc_caps.h"
 #include "taiko_hit_led.h"
 #include "taiko_hit_processor.h"
-#include "tinyusb.h"
-#include "tinyusb_default_config.h"
+#include "taiko_reports.h"
+#include "taiko_usb.h"
 
-/************* TinyUSB descriptors ****************/
-
-enum {
-    ITF_NUM_HID,
-    ITF_NUM_TOTAL,
-};
-
-#define EPNUM_HID 0x81
-#define TUSB_DESC_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN)
-
-#define USB_VID 0x4869
-#define USB_PID 0x4869
 #define USB_REPORT_INTERVAL_US 1000
 
 /************* V2 digital controls ****************/
@@ -57,13 +44,6 @@ typedef enum {
     INPUT_HOME,
     CONTROLLER_INPUT_COUNT,
 } controller_input_t;
-
-typedef enum {
-    CONTROLLER_MODE_ARCADE = 0,
-    CONTROLLER_MODE_PC,
-    CONTROLLER_MODE_SWITCH,
-    CONTROLLER_MODE_PS4,
-} controller_mode_t;
 
 typedef struct {
     bool stable_pressed;
@@ -121,31 +101,23 @@ static const gpio_num_t kDipGpios[4] = {
 #define CHANNELS_PER_PLAYER TAIKO_CHANNELS_PER_PLAYER
 #define TOTAL_CHANNELS (PLAYERS * CHANNELS_PER_PLAYER)
 
-// ESP32-S3's ADC digital controller uses a 2.5 MHz trigger timer. ESP-IDF
-// accepts 83,333 here, programs interval 30, and the resulting conversion
-// rate is 83,333.333 Hz (10,416.667 complete samples/s for each of 8 inputs).
-#define ADC_REQUESTED_CONVERSION_RATE_HZ 83333UL
+// ESP32-S3's ADC digital controller uses a 2.5 MHz trigger timer. Arcade mode
+// samples eight channels at 83,333.333 conversions/s. Single-player modes use
+// only P1's four channels at 41,666.667 conversions/s. Both yield the detector's
+// calibrated 10,416.667 samples/s/channel.
+#define ADC_ARCADE_REQUESTED_CONVERSION_RATE_HZ 83333UL
+#define ADC_SINGLE_PLAYER_REQUESTED_CONVERSION_RATE_HZ 41666UL
 #define ADC_SCANS_PER_DMA_FRAME 8
-#define DMA_CONVERSIONS_PER_FRAME (TOTAL_CHANNELS * ADC_SCANS_PER_DMA_FRAME)
-#define DMA_FRAME_BYTES (DMA_CONVERSIONS_PER_FRAME * SOC_ADC_DIGI_RESULT_BYTES)
-#define DMA_STORE_BUFFER_BYTES (DMA_FRAME_BYTES * 8)
+#define MAX_DMA_CONVERSIONS_PER_FRAME                                      \
+    (TOTAL_CHANNELS * ADC_SCANS_PER_DMA_FRAME)
+#define MAX_DMA_FRAME_BYTES                                                \
+    (MAX_DMA_CONVERSIONS_PER_FRAME * SOC_ADC_DIGI_RESULT_BYTES)
 #define ADC_READ_TIMEOUT_MS 2
 #define ADC_ATTEN_DB ADC_ATTEN_DB_12
 #define ADC_BIT_WIDTH ADC_BITWIDTH_12
 #define HIT_SENSITIVITY TAIKO_SENSITIVITY_BALANCED
 #define ADC_RAW_LEVELS (1U << 12)
 #define NOMINAL_ADC_FULL_SCALE_MV 3100U
-
-typedef struct __attribute__((packed)) {
-    int8_t x;
-    int8_t y;
-    int8_t z;
-    int8_t rz;
-    int8_t rx;
-    int8_t ry;
-    uint8_t hat;
-    uint32_t buttons;
-} taiko_hid_report_t;
 
 // Each player's four channels are contiguous. Within a player, mechanically
 // coupled same-side sensors are adjacent in the ADC pattern.
@@ -164,71 +136,12 @@ static uint32_t s_published_outputs[PLAYERS];
 static uint16_t s_adc_millivolts[ADC_RAW_LEVELS];
 static button_filter_t s_button_filters[CONTROLLER_INPUT_COUNT];
 static uint8_t s_dip_switches;
-static controller_mode_t s_controller_mode;
-
-static const uint8_t hid_report_descriptor[] = {
-    TUD_HID_REPORT_DESC_GAMEPAD(HID_REPORT_ID(0x01))
-};
-
-static const tusb_desc_device_t device_descriptor = {
-    .bLength = sizeof(device_descriptor),
-    .bDescriptorType = TUSB_DESC_DEVICE,
-    .bcdUSB = 0x0200,
-    .bDeviceClass = TUSB_CLASS_UNSPECIFIED,
-    .bDeviceSubClass = 0x00,
-    .bDeviceProtocol = 0x00,
-    .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
-    .idVendor = USB_VID,
-    .idProduct = USB_PID,
-    .bcdDevice = 0x0100,
-    .iManufacturer = 0x01,
-    .iProduct = 0x02,
-    .iSerialNumber = 0x03,
-    .bNumConfigurations = 0x01,
-};
-
-static const uint8_t hid_configuration_descriptor[] = {
-    TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, TUSB_DESC_TOTAL_LEN,
-                          TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
-    TUD_HID_DESCRIPTOR(ITF_NUM_HID, 4, false, sizeof(hid_report_descriptor),
-                       EPNUM_HID, sizeof(taiko_hid_report_t), 1),
-};
-
-static const char *hid_string_descriptor[] = {
-    (const char[]){0x09, 0x04},  // 0: English (0x0409)
-    "Taiko Community",           // 1: Manufacturer
-    "Taiko Controller",          // 2: Product
-    "0001",                      // 3: Serial
-    "Gamepad",                   // 4: HID Interface
-};
-
-/********* TinyUSB HID callbacks ***************/
-
-uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance) {
-    (void)instance;
-    return hid_report_descriptor;
-}
-
-uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id,
-                               hid_report_type_t report_type, uint8_t *buffer,
-                               uint16_t reqlen) {
-    (void)instance;
-    (void)report_id;
-    (void)report_type;
-    (void)buffer;
-    (void)reqlen;
-    return 0;
-}
-
-void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
-                           hid_report_type_t report_type,
-                           uint8_t const *buffer, uint16_t bufsize) {
-    (void)instance;
-    (void)report_id;
-    (void)report_type;
-    (void)buffer;
-    (void)bufsize;
-}
+static taiko_controller_mode_t s_controller_mode;
+static int s_active_players = PLAYERS;
+static int s_active_channels = TOTAL_CHANNELS;
+static uint32_t s_adc_conversion_rate_hz =
+    ADC_ARCADE_REQUESTED_CONVERSION_RATE_HZ;
+static uint32_t s_dma_frame_bytes = MAX_DMA_FRAME_BYTES;
 
 /********* V2 digital controls ***************/
 
@@ -280,84 +193,57 @@ static bool button_pressed(controller_input_t input) {
     return s_button_filters[input].stable_pressed;
 }
 
-static uint8_t build_hat_value(void) {
-    bool up = button_pressed(INPUT_DPAD_UP);
-    bool right = button_pressed(INPUT_DPAD_RIGHT);
-    bool down = button_pressed(INPUT_DPAD_DOWN);
-    bool left = button_pressed(INPUT_DPAD_LEFT);
-
-    // Opposite directions cancel each other instead of producing an invalid
-    // hat value.
-    if (up && down) {
-        up = false;
-        down = false;
+static uint8_t build_dpad_bitmap(void) {
+    uint8_t dpad = 0;
+    if (button_pressed(INPUT_DPAD_UP)) {
+        dpad |= TAIKO_DPAD_UP;
     }
-    if (left && right) {
-        left = false;
-        right = false;
+    if (button_pressed(INPUT_DPAD_RIGHT)) {
+        dpad |= TAIKO_DPAD_RIGHT;
     }
-
-    if (up) {
-        if (right) {
-            return GAMEPAD_HAT_UP_RIGHT;
-        }
-        if (left) {
-            return GAMEPAD_HAT_UP_LEFT;
-        }
-        return GAMEPAD_HAT_UP;
+    if (button_pressed(INPUT_DPAD_DOWN)) {
+        dpad |= TAIKO_DPAD_DOWN;
     }
-    if (down) {
-        if (right) {
-            return GAMEPAD_HAT_DOWN_RIGHT;
-        }
-        if (left) {
-            return GAMEPAD_HAT_DOWN_LEFT;
-        }
-        return GAMEPAD_HAT_DOWN;
+    if (button_pressed(INPUT_DPAD_LEFT)) {
+        dpad |= TAIKO_DPAD_LEFT;
     }
-    if (right) {
-        return GAMEPAD_HAT_RIGHT;
-    }
-    if (left) {
-        return GAMEPAD_HAT_LEFT;
-    }
-    return GAMEPAD_HAT_CENTERED;
+    return dpad;
 }
 
-static uint32_t build_button_bitmap(void) {
-    uint32_t buttons = 0;
-    if (button_pressed(INPUT_FACE_DOWN)) {
-        buttons |= GAMEPAD_BUTTON_SOUTH;
+static uint16_t build_button_bitmap(void) {
+    uint16_t buttons = 0;
+    if (button_pressed(INPUT_FACE_UP)) {
+        buttons |= TAIKO_BUTTON_FACE_UP;
     }
     if (button_pressed(INPUT_FACE_RIGHT)) {
-        buttons |= GAMEPAD_BUTTON_EAST;
+        buttons |= TAIKO_BUTTON_FACE_RIGHT;
     }
-    if (button_pressed(INPUT_FACE_UP)) {
-        buttons |= GAMEPAD_BUTTON_NORTH;
+    if (button_pressed(INPUT_FACE_DOWN)) {
+        buttons |= TAIKO_BUTTON_FACE_DOWN;
     }
     if (button_pressed(INPUT_FACE_LEFT)) {
-        buttons |= GAMEPAD_BUTTON_WEST;
+        buttons |= TAIKO_BUTTON_FACE_LEFT;
     }
     if (button_pressed(INPUT_L1)) {
-        buttons |= GAMEPAD_BUTTON_TL;
+        buttons |= TAIKO_BUTTON_L1;
     }
     if (button_pressed(INPUT_R1)) {
-        buttons |= GAMEPAD_BUTTON_TR;
+        buttons |= TAIKO_BUTTON_R1;
     }
     if (button_pressed(INPUT_L2)) {
-        buttons |= GAMEPAD_BUTTON_TL2;
+        buttons |= TAIKO_BUTTON_L2;
     }
     if (button_pressed(INPUT_R2)) {
-        buttons |= GAMEPAD_BUTTON_TR2;
+        buttons |= TAIKO_BUTTON_R2;
     }
     if (button_pressed(INPUT_SELECT)) {
-        buttons |= GAMEPAD_BUTTON_SELECT;
+        buttons |= TAIKO_BUTTON_SELECT;
     }
     if (button_pressed(INPUT_START)) {
-        buttons |= GAMEPAD_BUTTON_START;
+        buttons |= TAIKO_BUTTON_START;
     }
     if (button_pressed(INPUT_HOME)) {
-        buttons |= GAMEPAD_BUTTON_MODE;
+        buttons |= TAIKO_BUTTON_HOME;
     }
     return buttons;
 }
@@ -384,22 +270,30 @@ static void initialize_board_inputs(void) {
         "Nintendo Switch",
         "PS4",
     };
-    s_controller_mode = (controller_mode_t)(
+    s_controller_mode = (taiko_controller_mode_t)(
         (s_dip_switches >> DIP_MODE_SHIFT) & DIP_MODE_MASK);
+    s_active_players =
+        s_controller_mode == TAIKO_CONTROLLER_MODE_ARCADE ? PLAYERS : 1;
+    s_active_channels = s_active_players * CHANNELS_PER_PLAYER;
+    s_adc_conversion_rate_hz =
+        s_active_players == PLAYERS
+            ? ADC_ARCADE_REQUESTED_CONVERSION_RATE_HZ
+            : ADC_SINGLE_PLAYER_REQUESTED_CONVERSION_RATE_HZ;
+    s_dma_frame_bytes = (uint32_t)s_active_channels * ADC_SCANS_PER_DMA_FRAME *
+                        SOC_ADC_DIGI_RESULT_BYTES;
     ESP_LOGI(TAG,
-             "DIP: P1 long-tail=%s, P2 long-tail=%s, mode=%s "
-             "(generic HID transport)",
+             "DIP: P1 long-tail=%s, P2 long-tail=%s, mode=%s, players=%d",
              (s_dip_switches & DIP_P1_LONG_TAIL) != 0 ? "on" : "off",
              (s_dip_switches & DIP_P2_LONG_TAIL) != 0 ? "on" : "off",
-             mode_names[s_controller_mode]);
+             mode_names[s_controller_mode], s_active_players);
 }
 
 /********* ADC continuous sampling ***************/
 
 static esp_err_t init_adc(void) {
     adc_continuous_handle_cfg_t handle_config = {
-        .max_store_buf_size = DMA_STORE_BUFFER_BYTES,
-        .conv_frame_size = DMA_FRAME_BYTES,
+        .max_store_buf_size = s_dma_frame_bytes * 8U,
+        .conv_frame_size = s_dma_frame_bytes,
         .flags = {.flush_pool = 1},
     };
     ESP_ERROR_CHECK(adc_continuous_new_handle(&handle_config, &s_adc_handle));
@@ -408,7 +302,7 @@ static esp_err_t init_adc(void) {
     memset(s_pattern_slot_by_adc_channel, -1,
            sizeof(s_pattern_slot_by_adc_channel));
 
-    for (int slot = 0; slot < TOTAL_CHANNELS; ++slot) {
+    for (int slot = 0; slot < s_active_channels; ++slot) {
         adc_unit_t unit;
         adc_channel_t channel;
         ESP_ERROR_CHECK(adc_continuous_io_to_channel(
@@ -424,9 +318,9 @@ static esp_err_t init_adc(void) {
     }
 
     adc_continuous_config_t digital_config = {
-        .pattern_num = TOTAL_CHANNELS,
+        .pattern_num = (uint32_t)s_active_channels,
         .adc_pattern = pattern,
-        .sample_freq_hz = ADC_REQUESTED_CONVERSION_RATE_HZ,
+        .sample_freq_hz = s_adc_conversion_rate_hz,
         .conv_mode = ADC_CONV_SINGLE_UNIT_1,
         .format = ADC_DIGI_OUTPUT_FORMAT_TYPE2,
     };
@@ -507,7 +401,7 @@ static taiko_hit_output_t decode_output(uint32_t encoded) {
 }
 
 static void process_complete_adc_scan(const uint16_t scan[TOTAL_CHANNELS]) {
-    for (int player = 0; player < PLAYERS; ++player) {
+    for (int player = 0; player < s_active_players; ++player) {
         const uint16_t *player_samples =
             &scan[player * CHANNELS_PER_PLAYER];
         taiko_hit_event_t hit_event;
@@ -525,7 +419,7 @@ static void process_complete_adc_scan(const uint16_t scan[TOTAL_CHANNELS]) {
 static void adc_reader_task(void *argument) {
     (void)argument;
     uint8_t *raw = heap_caps_malloc(
-        DMA_FRAME_BYTES, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
+        s_dma_frame_bytes, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
     if (raw == NULL) {
         ESP_LOGE(TAG, "ADC DMA read buffer allocation failed");
         vTaskDelete(NULL);
@@ -546,7 +440,7 @@ static void adc_reader_task(void *argument) {
         while (true) {
             uint32_t bytes_read = 0;
             const esp_err_t result = adc_continuous_read(
-                s_adc_handle, raw, DMA_FRAME_BYTES, &bytes_read,
+                s_adc_handle, raw, s_dma_frame_bytes, &bytes_read,
                 first_read ? ADC_READ_TIMEOUT_MS : 0);
             first_read = false;
 
@@ -571,7 +465,7 @@ static void adc_reader_task(void *argument) {
                 }
                 const int slot =
                     s_pattern_slot_by_adc_channel[adc_channel];
-                if (slot < 0 || slot >= TOTAL_CHANNELS) {
+                if (slot < 0 || slot >= s_active_channels) {
                     expected_slot = 0;
                     continue;
                 }
@@ -591,7 +485,7 @@ static void adc_reader_task(void *argument) {
                                          ? raw_sample
                                          : ADC_RAW_LEVELS - 1U];
                 expected_slot++;
-                if (expected_slot == TOTAL_CHANNELS) {
+                if (expected_slot == (size_t)s_active_channels) {
                     process_complete_adc_scan(scan);
                     expected_slot = 0;
                 }
@@ -600,16 +494,18 @@ static void adc_reader_task(void *argument) {
     }
 }
 
-/********* HID report publication ***************/
+/********* USB report publication ***************/
 
-static void apply_player_output(
-    taiko_hid_report_t *report, int player, taiko_hit_output_t output) {
+static void apply_arcade_output(taiko_input_snapshot_t *input, int player,
+                                taiko_hit_output_t output) {
     if (!output.active || output.axis_value == 0) {
         return;
     }
 
-    int8_t *horizontal = player == 0 ? &report->x : &report->rx;
-    int8_t *vertical = player == 0 ? &report->y : &report->ry;
+    int8_t *horizontal =
+        player == 0 ? &input->arcade_x : &input->arcade_rx;
+    int8_t *vertical =
+        player == 0 ? &input->arcade_y : &input->arcade_ry;
     const int8_t value = (int8_t)output.axis_value;
     switch (output.zone) {
         case TAIKO_ZONE_LEFT_DON:
@@ -627,49 +523,56 @@ static void apply_player_output(
     }
 }
 
-static taiko_hid_report_t build_hid_report(void) {
-    taiko_hid_report_t report = {
-        .hat = build_hat_value(),
-        .buttons = build_button_bitmap(),
-    };
-    for (int player = 0; player < PLAYERS; ++player) {
-        const uint32_t encoded = __atomic_load_n(
-            &s_published_outputs[player], __ATOMIC_ACQUIRE);
-        apply_player_output(&report, player, decode_output(encoded));
+static uint8_t drum_button_for_zone(taiko_zone_t zone) {
+    switch (zone) {
+        case TAIKO_ZONE_LEFT_DON:
+            return TAIKO_DRUM_LEFT_DON;
+        case TAIKO_ZONE_RIGHT_DON:
+            return TAIKO_DRUM_RIGHT_DON;
+        case TAIKO_ZONE_LEFT_KA:
+            return TAIKO_DRUM_LEFT_KA;
+        case TAIKO_ZONE_RIGHT_KA:
+            return TAIKO_DRUM_RIGHT_KA;
     }
-    return report;
+    return 0;
 }
 
-static void hid_report_timer_cb(void *argument) {
+static taiko_input_snapshot_t build_input_snapshot(void) {
+    taiko_input_snapshot_t input = {
+        .dpad = build_dpad_bitmap(),
+        .buttons = build_button_bitmap(),
+    };
+    for (int player = 0; player < s_active_players; ++player) {
+        const uint32_t encoded = __atomic_load_n(
+            &s_published_outputs[player], __ATOMIC_ACQUIRE);
+        const taiko_hit_output_t output = decode_output(encoded);
+        if (s_controller_mode == TAIKO_CONTROLLER_MODE_ARCADE) {
+            apply_arcade_output(&input, player, output);
+        } else if (player == 0 && output.active && output.axis_value != 0) {
+            input.drum_buttons |= drum_button_for_zone(output.zone);
+        }
+    }
+    return input;
+}
+
+static void usb_report_timer_cb(void *argument) {
     (void)argument;
     sample_button_filters();
-    if (!tud_mounted()) {
-        return;
-    }
-    if (tud_suspended()) {
-        tud_remote_wakeup();
-    }
-
-    const bool host_ready = tud_hid_ready();
-    if (host_ready) {
-        const taiko_hid_report_t report = build_hid_report();
-        tud_hid_report(0x01, &report, sizeof(report));
-    }
+    const taiko_input_snapshot_t input = build_input_snapshot();
+    (void)taiko_usb_send(&input);
 }
 
 void app_main(void) {
     initialize_board_inputs();
+    ESP_ERROR_CHECK(taiko_usb_install(s_controller_mode));
+    if (s_controller_mode == TAIKO_CONTROLLER_MODE_PS4 &&
+        !taiko_usb_ps4_authentication_available()) {
+        ESP_LOGW(TAG,
+                 "PS4 USB reports enabled without licensed authentication; "
+                 "native console sessions cannot remain authenticated");
+    }
 
-    tinyusb_config_t tinyusb_config = TINYUSB_DEFAULT_CONFIG();
-    tinyusb_config.descriptor.device = &device_descriptor;
-    tinyusb_config.descriptor.full_speed_config =
-        hid_configuration_descriptor;
-    tinyusb_config.descriptor.string = hid_string_descriptor;
-    tinyusb_config.descriptor.string_count =
-        sizeof(hid_string_descriptor) / sizeof(hid_string_descriptor[0]);
-    ESP_ERROR_CHECK(tinyusb_driver_install(&tinyusb_config));
-
-    for (int player = 0; player < PLAYERS; ++player) {
+    for (int player = 0; player < s_active_players; ++player) {
         const uint8_t profile_switch =
             player == 0 ? DIP_P1_LONG_TAIL : DIP_P2_LONG_TAIL;
         const taiko_hit_config_t hit_config =
@@ -703,9 +606,9 @@ void app_main(void) {
     vTaskDelay(pdMS_TO_TICKS(2));
 
     const esp_timer_create_args_t timer_args = {
-        .callback = hid_report_timer_cb,
+        .callback = usb_report_timer_cb,
         .dispatch_method = ESP_TIMER_TASK,
-        .name = "hid_report",
+        .name = "usb_report",
     };
     esp_timer_handle_t hid_timer;
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &hid_timer));
