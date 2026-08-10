@@ -16,7 +16,9 @@
 
 #include "class/hid/hid_device.h"
 #include "device/usbd_pvt.h"
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "taiko_ps4_auth.h"
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
 #include "tusb.h"
@@ -54,6 +56,7 @@ static uint8_t s_ps4_nonce_id;
 static uint8_t s_xinput_in_endpoint;
 static uint8_t s_xinput_out_endpoint;
 static uint8_t s_xinput_out_buffer[XINPUT_ENDPOINT_SIZE];
+static const char *TAG = "taiko_usb";
 
 static const char kLanguage[] = {0x09, 0x04, 0x00};
 
@@ -595,6 +598,10 @@ static uint16_t ps4_get_feature_report(uint8_t report_id, uint8_t *buffer,
             return copy_limited(buffer, requested_length, kPs4Version,
                                 sizeof(kPs4Version));
         case 0xf1: {
+            if (taiko_ps4_auth_available()) {
+                return (uint16_t)taiko_ps4_auth_get_signature(
+                    buffer, requested_length);
+            }
             // There is deliberately no fabricated signature. This correctly
             // shaped zero response is useful for USB development, but cannot
             // satisfy a PS4 authentication challenge.
@@ -607,6 +614,10 @@ static uint16_t ps4_get_feature_report(uint8_t report_id, uint8_t *buffer,
             return copy_limited(buffer, requested_length, &response[1], 63);
         }
         case 0xf2: {
+            if (taiko_ps4_auth_available()) {
+                return (uint16_t)taiko_ps4_auth_get_status(
+                    buffer, requested_length);
+            }
             uint8_t response[16] = {
                 0xf2,
                 __atomic_load_n(&s_ps4_nonce_id, __ATOMIC_RELAXED),
@@ -617,6 +628,7 @@ static uint16_t ps4_get_feature_report(uint8_t report_id, uint8_t *buffer,
             return copy_limited(buffer, requested_length, &response[1], 15);
         }
         case 0xf3:
+            taiko_ps4_auth_reset();
             return copy_limited(buffer, requested_length, kPs4AuthReset,
                                 sizeof(kPs4AuthReset));
         default:
@@ -678,6 +690,9 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
         report_type == HID_REPORT_TYPE_FEATURE && report_id == 0xf0 &&
         buffer_size >= 1) {
         __atomic_store_n(&s_ps4_nonce_id, buffer[0], __ATOMIC_RELAXED);
+        if (taiko_ps4_auth_available()) {
+            (void)taiko_ps4_auth_set_nonce(buffer, buffer_size);
+        }
     }
     // Rumble, light-bar, and player-LED outputs are accepted by the endpoints
     // but intentionally do not drive the per-hit LED chain.
@@ -713,6 +728,14 @@ esp_err_t taiko_usb_install(taiko_controller_mode_t mode) {
     memset(&s_ps4_report, 0, sizeof(s_ps4_report));
     __atomic_store_n(&s_ps4_report_counter, 0, __ATOMIC_RELAXED);
     __atomic_store_n(&s_ps4_nonce_id, 0, __ATOMIC_RELAXED);
+
+    if (mode == TAIKO_CONTROLLER_MODE_PS4) {
+        const esp_err_t auth_result = taiko_ps4_auth_init();
+        if (auth_result != ESP_OK && auth_result != ESP_ERR_NOT_SUPPORTED) {
+            ESP_LOGW(TAG, "PS4 authentication initialization failed: %s",
+                     esp_err_to_name(auth_result));
+        }
+    }
 
     switch (mode) {
         case TAIKO_CONTROLLER_MODE_ARCADE:
@@ -806,5 +829,5 @@ bool taiko_usb_send(const taiko_input_snapshot_t *input) {
 }
 
 bool taiko_usb_ps4_authentication_available(void) {
-    return false;
+    return taiko_ps4_auth_available();
 }

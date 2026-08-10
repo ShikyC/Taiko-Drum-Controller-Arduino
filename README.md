@@ -23,11 +23,11 @@ The firmware has been thoroughly tested with Taiko Force Lv. 5 and Lv. 6 drums. 
   5 ms debounce and translates them for each selected controller protocol.
 - [x] Provides Arcade HID, PC XInput, Nintendo Switch, and PS4-shaped USB
   descriptors and input reports.
+- [x] Supports asynchronous, credential-backed PS4 authentication when the
+  firmware is provisioned at build time.
 - [ ] Physical USB enumeration and gameplay validation of the three new modes
-  still require tests on the production board and target hosts/consoles.
-- [ ] Native PS4 authentication is not available. PS4 consoles require a
-  licensed credential or an attached donor controller; this board currently
-  has neither, so PS4 mode cannot maintain an authenticated console session.
+  still require tests on the production board and target hosts/consoles. This
+  includes a sustained authenticated PS4 session with provisioned credentials.
 
 ## Hardware Support
 
@@ -43,17 +43,20 @@ The firmware does these main things:
    profiles and USB protocol for that entire connection.
 2. Configures TinyUSB as Arcade HID, XInput, Nintendo Switch HID, or PS4 HID
    through [`main/taiko_usb.c`](./main/taiko_usb.c).
-3. Configures ADC continuous sampling for all eight sensor inputs in Arcade
+3. When PS4 credentials are provisioned, validates the embedded RSA key before
+   ADC startup and handles console challenges on an asynchronous worker through
+   [`main/taiko_ps4_auth.c`](./main/taiko_ps4_auth.c).
+4. Configures ADC continuous sampling for all eight sensor inputs in Arcade
    mode or only P1's four inputs in the three single-player modes.
-4. Reassembles complete scans independent of DMA frame boundaries.
-5. Converts raw ADC readings through an eFuse-calibrated millivolt lookup table.
-6. Runs baseline removal, a 0.96 ms RMS window, winner selection, and hit/rearm
+5. Reassembles complete scans independent of DMA frame boundaries.
+6. Converts raw ADC readings through an eFuse-calibrated millivolt lookup table.
+7. Runs baseline removal, a 0.96 ms RMS window, winner selection, and hit/rearm
    state through the platform-independent processor in
    [`main/taiko_hit_processor.c`](./main/taiko_hit_processor.c).
-7. Builds mode-specific reports through the pure translators in
+8. Builds mode-specific reports through the pure translators in
    [`main/taiko_reports.c`](./main/taiko_reports.c). Arcade mode keeps analog
    strength; XInput, Switch, and PS4 modes convert P1 hits to buttons.
-8. Polls and debounces the digital controls at the USB report cadence and
+9. Polls and debounces the digital controls at the USB report cadence and
    notifies a lower-priority, core-isolated RMT worker that drives eight
    independent channel indicators without blocking ADC processing.
 
@@ -144,7 +147,7 @@ Mode bits are ordered as `DIP4:DIP3`:
 | OFF | OFF | Arcade HID | 2 | Analog strength on X/Y/Rx/Ry |
 | OFF | ON | PC XInput | 1 | Buttons |
 | ON | OFF | Nintendo Switch | 1 | Buttons |
-| ON | ON | PlayStation 4 | 1 | Buttons; see authentication limitation below |
+| ON | ON | PlayStation 4 | 1 | Buttons; see credential provisioning below |
 
 All four DIP states are latched once before USB and ADC initialization.
 Changing any pole while the board is running does nothing; unplug the board,
@@ -180,9 +183,10 @@ does not change the ADC input order.
 
 The existing [`espressif/esp_tinyusb`](./main/idf_component.yml) dependency is
 sufficient for all four transports. XInput uses TinyUSB's custom class-driver
-hook and Microsoft OS 2.0 descriptor; Switch and PS4 use HID. No additional
+hook and Microsoft OS 2.0 descriptor; Switch and PS4 use HID. Credential-backed
+PS4 builds use ESP-IDF's bundled mbedTLS implementation. No additional
 controller library needs to be installed manually. ESP-IDF's component manager
-resolves the locked TinyUSB components during the normal build.
+resolves the locked components during the normal build.
 
 Hardware files:
 
@@ -247,12 +251,42 @@ reconnect USB. The reported product depends on the selected mode:
 | Nintendo Switch | `POKKEN CONTROLLER`, Switch-compatible HID |
 | PS4 | `Taiko Controller (PS4)`, PS4-shaped HID reports |
 
-PS4 report mode is not the same as authenticated native-console support. A PS4
-periodically challenges a controller for a signature backed by a licensed
-credential. This firmware deliberately does not fabricate a signature, and
-the board has no donor-controller path, so a native PS4 session cannot remain
-authenticated. The mode is still useful for USB enumeration and report
-development on a host.
+### PS4 Authentication
+
+An ordinary `idf.py build` remains credential-free. It produces PS4-shaped HID
+reports for host development, but a native PS4 session will still reach the
+console's authentication timeout.
+
+Credential-backed builds accept this private directory layout. The short file
+names already used by this checkout and the GP2040-CE-style aliases are both
+supported:
+
+```text
+ps4_auth/
+├── key.pem          # or private.pem; unencrypted 2048-bit RSA private key
+├── serial.txt       # exactly 16 hexadecimal characters
+└── sig.bin          # or signature.bin; exactly 256 bytes
+```
+
+Only use credentials you are authorized to use. This project does not include
+or distribute PlayStation credentials. Build and flash a dedicated image with:
+
+```sh
+idf.py -B build-ps4-auth -DTAIKO_PS4_AUTH_DIR=ps4_auth build
+idf.py -B build-ps4-auth flash
+```
+
+The resulting build directory and firmware image contain the private key. Keep
+both private and do not distribute them. Continue using the same dedicated
+build directory for subsequent authenticated builds; CMake caches the selected
+credential path there.
+
+The current V2 PCB exposes only the ESP32-S3 device-side native USB connection,
+so it cannot use the alternative donor-controller USB passthrough method without
+additional USB-host hardware. Configuration checks the serial and signature
+sizes and the PEM file shape; firmware startup then parses and validates the RSA
+key before enabling authentication. Final acceptance still requires a
+production-board test on a PS4 beyond the normal authentication interval.
 
 ## Development
 
@@ -265,6 +299,15 @@ cc -std=c11 -Wall -Wextra -Werror -I main \
   tests/test_taiko_reports.c main/taiko_reports.c \
   -o /tmp/test_taiko_reports
 /tmp/test_taiko_reports
+```
+
+The PS4 authentication report state machine has a separate host-side test:
+
+```sh
+cc -std=c11 -Wall -Wextra -Werror -I main \
+  tests/test_taiko_ps4_auth_protocol.c main/taiko_ps4_auth_protocol.c \
+  -o /tmp/test_taiko_ps4_auth_protocol
+/tmp/test_taiko_ps4_auth_protocol
 ```
 
 ![Online tool](./images/online_tool.png)
@@ -361,6 +404,8 @@ Even with the PCB package available, treat the wiring and analog front end as ex
   component and the [TinyUSB](https://github.com/hathach/tinyusb) stack.
 - Switch and PS4 descriptor/report definitions are adapted from the
   MIT-licensed [GP2040-CE](https://github.com/OpenStickCommunity/GP2040-CE)
+  project. PS4 challenge signing and report framing also follow GP2040-CE and
+  the MIT-licensed [Passing Link](https://github.com/passinglink/passinglink)
   project. The XInput custom-class and Microsoft OS descriptor implementation
   is adapted from the MIT-licensed
   [Adafruit_TinyUSB_XInput](https://github.com/JonnyHaystack/Adafruit_TinyUSB_XInput)

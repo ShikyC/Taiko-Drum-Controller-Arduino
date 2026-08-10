@@ -80,3 +80,7 @@ Desktop.ini
 
 # For local testing and development only
 simulation/
+
+# Never commit locally provisioned PlayStation authentication credentials.
+/ps4_auth/
+/build-ps4-auth/
