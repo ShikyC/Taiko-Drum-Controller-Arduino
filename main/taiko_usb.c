@@ -132,8 +132,56 @@ static const tusb_desc_device_t kPs4DeviceDescriptor = {
     .bNumConfigurations = 1,
 };
 
+// Deliberately not TUD_HID_REPORT_DESC_GAMEPAD. That template declares six
+// axes (X, Y, Z, Rz, Rx, Ry), and hosts do not index axes in descriptor
+// order: SDL's Windows DirectInput backend sorts them into the fixed
+// DIJOYSTATE2 order (X, Y, Z, Rx, Ry, Rz), so Rz landed on SDL axis 5 and the
+// P2 pair Rx/Ry landed on axes 3 and 4. Taiko Arcade Loader reads P2 from
+// rightx/righty, which the documented gamecontrollerdb entry binds to a2/a3,
+// so P2's horizontal axis was read as its vertical one and P2's vertical axis
+// was not read at all.
+//
+// Declaring only the four axes we drive removes the ambiguity: X, Y, Z, Rz
+// occupy DIJOYSTATE2 offsets 0, 4, 8 and 20, so they enumerate as axes 0..3
+// in declaration order under DirectInput, evdev, and plain report order
+// alike. X/Y plus Z/Rz is also the conventional left-stick/right-stick pair
+// for HID gamepads.
 static const uint8_t kArcadeReportDescriptor[] = {
-    TUD_HID_REPORT_DESC_GAMEPAD(HID_REPORT_ID(0x01))
+    HID_USAGE_PAGE(HID_USAGE_PAGE_DESKTOP),
+    HID_USAGE(HID_USAGE_DESKTOP_GAMEPAD),
+    HID_COLLECTION(HID_COLLECTION_APPLICATION),
+        HID_REPORT_ID(0x01)
+        // P1 hit strength on X/Y, P2 hit strength on Z/Rz.
+        HID_USAGE_PAGE(HID_USAGE_PAGE_DESKTOP),
+        HID_USAGE(HID_USAGE_DESKTOP_X),
+        HID_USAGE(HID_USAGE_DESKTOP_Y),
+        HID_USAGE(HID_USAGE_DESKTOP_Z),
+        HID_USAGE(HID_USAGE_DESKTOP_RZ),
+        HID_LOGICAL_MIN(0x81),
+        HID_LOGICAL_MAX(0x7f),
+        HID_REPORT_COUNT(4),
+        HID_REPORT_SIZE(8),
+        HID_INPUT(HID_DATA | HID_VARIABLE | HID_ABSOLUTE),
+        // 8 bit D-pad/hat.
+        HID_USAGE_PAGE(HID_USAGE_PAGE_DESKTOP),
+        HID_USAGE(HID_USAGE_DESKTOP_HAT_SWITCH),
+        HID_LOGICAL_MIN(1),
+        HID_LOGICAL_MAX(8),
+        HID_PHYSICAL_MIN(0),
+        HID_PHYSICAL_MAX_N(315, 2),
+        HID_REPORT_COUNT(1),
+        HID_REPORT_SIZE(8),
+        HID_INPUT(HID_DATA | HID_VARIABLE | HID_ABSOLUTE),
+        // 32 bit button map.
+        HID_USAGE_PAGE(HID_USAGE_PAGE_BUTTON),
+        HID_USAGE_MIN(1),
+        HID_USAGE_MAX(32),
+        HID_LOGICAL_MIN(0),
+        HID_LOGICAL_MAX(1),
+        HID_REPORT_COUNT(32),
+        HID_REPORT_SIZE(1),
+        HID_INPUT(HID_DATA | HID_VARIABLE | HID_ABSOLUTE),
+    HID_COLLECTION_END,
 };
 
 #define ARCADE_CONFIG_LENGTH (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN)
@@ -333,6 +381,8 @@ _Static_assert(sizeof(kSwitchConfigurationDescriptor) ==
                "Switch configuration descriptor length changed");
 _Static_assert(sizeof(kPs4ConfigurationDescriptor) == PS4_CONFIG_LENGTH,
                "PS4 configuration descriptor length changed");
+_Static_assert(sizeof(kArcadeReportDescriptor) == 64,
+               "Arcade report descriptor length changed");
 _Static_assert(sizeof(kSwitchReportDescriptor) == 86,
                "Switch report descriptor length changed");
 _Static_assert(sizeof(kPs4ReportDescriptor) == 481,

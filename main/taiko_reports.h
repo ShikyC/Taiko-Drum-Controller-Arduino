@@ -57,19 +57,20 @@ typedef struct {
     uint8_t dpad;
     uint16_t buttons;
     uint8_t drum_buttons;
-    int8_t arcade_x;
-    int8_t arcade_y;
-    int8_t arcade_rx;
-    int8_t arcade_ry;
+    int8_t arcade_p1_x;
+    int8_t arcade_p1_y;
+    int8_t arcade_p2_x;
+    int8_t arcade_p2_y;
 } taiko_input_snapshot_t;
 
+// Matches kArcadeReportDescriptor: P1 on X/Y, P2 on Z/Rz. Declaring exactly
+// these four axes is what makes them enumerate as host axes 0..3, which is
+// the order Taiko Arcade Loader's leftx/lefty/rightx/righty bindings expect.
 typedef struct __attribute__((packed)) {
     int8_t x;
     int8_t y;
     int8_t z;
     int8_t rz;
-    int8_t rx;
-    int8_t ry;
     uint8_t hat;
     uint32_t buttons;
 } taiko_arcade_report_t;

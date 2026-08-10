@@ -144,7 +144,7 @@ Mode bits are ordered as `DIP4:DIP3`:
 
 | DIP4 | DIP3 | Controller mode | Drum players | Drum output |
 | --- | --- | --- | ---: | --- |
-| OFF | OFF | Arcade HID | 2 | Analog strength on X/Y/Rx/Ry |
+| OFF | OFF | Arcade HID | 2 | Analog strength on X/Y/Z/Rz |
 | OFF | ON | PC XInput | 1 | Buttons |
 | ON | OFF | Nintendo Switch | 1 | Buttons |
 | ON | ON | PlayStation 4 | 1 | Buttons; see credential provisioning below |
@@ -323,16 +323,24 @@ Arcade mode preserves the original USB identity:
 
 Its analog drum mapping is:
 
-| Player | Zone | HID output |
-| --- | --- | --- |
-| P1 | Left don | `+X` |
-| P1 | Left ka | `-X` |
-| P1 | Right don | `+Y` |
-| P1 | Right ka | `-Y` |
-| P2 | Left don | `+Rx` |
-| P2 | Left ka | `-Rx` |
-| P2 | Right don | `+Ry` |
-| P2 | Right ka | `-Ry` |
+| Player | Zone | HID output | Host axis | SDL axis |
+| --- | --- | --- | --- | --- |
+| P1 | Left don | `+X` | 0 | `+leftx` |
+| P1 | Left ka | `-X` | 0 | `-leftx` |
+| P1 | Right don | `+Y` | 1 | `+lefty` |
+| P1 | Right ka | `-Y` | 1 | `-lefty` |
+| P2 | Left don | `+Z` | 2 | `+rightx` |
+| P2 | Left ka | `-Z` | 2 | `-rightx` |
+| P2 | Right don | `+Rz` | 3 | `+righty` |
+| P2 | Right ka | `-Rz` | 3 | `-righty` |
+
+The report declares exactly these four axes. That matters: hosts do not index
+axes in descriptor order. SDL's Windows DirectInput backend sorts them into
+the fixed `DIJOYSTATE2` order (X, Y, Z, Rx, Ry, Rz), so a report that also
+declared Rx and Ry would push Rz out to axis 5 and put the P2 pair on axes 3
+and 4 — misaligned with the `rightx`/`righty` bindings below. With only X, Y,
+Z and Rz present they enumerate as axes 0 through 3 under DirectInput, evdev
+and plain report order alike.
 
 The physical digital controls are translated by location so their platform
 names remain natural:
@@ -421,5 +429,12 @@ the required files, open `gamecontrollerdb.txt` and add the following line:
 ```
 030052a8694800006948000000000000,Taiko Controller,-leftx:-a0,+leftx:+a0,-lefty:-a1,+lefty:+a1,-rightx:-a2,+rightx:+a2,-righty:-a3,+righty:+a3,platform:Windows,
 ```
+
+This binds axes 0 through 3 to `leftx`, `lefty`, `rightx` and `righty`, which
+is where the firmware puts P1's and P2's hit strength. The loader reads P1
+from the left stick and P2 from the right stick in
+[`bnusio.cpp`](https://github.com/esuo1198/TaikoArcadeLoader), taking left don
+from `+x`, left ka from `-x`, right don from `+y` and right ka from `-y` on
+each stick.
 
 Then, open `config.toml`, find the `[controller]` section, set `analog_input = true`. This will disable button input for the game and use analog axes' inputs. Now you can start the game and try out the new controller!

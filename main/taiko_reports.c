@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-_Static_assert(sizeof(taiko_arcade_report_t) == 11,
+_Static_assert(sizeof(taiko_arcade_report_t) == 9,
                "Arcade HID report layout changed");
 _Static_assert(sizeof(taiko_xinput_report_t) == 20,
                "XInput report layout changed");
@@ -171,10 +171,10 @@ static uint32_t arcade_button_bitmap(uint16_t buttons) {
 void taiko_build_arcade_report(
     const taiko_input_snapshot_t *input, taiko_arcade_report_t *report) {
     *report = (taiko_arcade_report_t){
-        .x = input->arcade_x,
-        .y = input->arcade_y,
-        .rx = input->arcade_rx,
-        .ry = input->arcade_ry,
+        .x = input->arcade_p1_x,
+        .y = input->arcade_p1_y,
+        .z = input->arcade_p2_x,
+        .rz = input->arcade_p2_y,
         .hat = (uint8_t)taiko_resolve_hat(input->dpad),
         .buttons = arcade_button_bitmap(input->buttons),
     };
@@ -341,8 +341,8 @@ bool taiko_input_has_activity(const taiko_input_snapshot_t *input,
         return true;
     }
     if (mode == TAIKO_CONTROLLER_MODE_ARCADE) {
-        return input->arcade_x != 0 || input->arcade_y != 0 ||
-               input->arcade_rx != 0 || input->arcade_ry != 0;
+        return input->arcade_p1_x != 0 || input->arcade_p1_y != 0 ||
+               input->arcade_p2_x != 0 || input->arcade_p2_y != 0;
     }
     return input->drum_buttons != 0;
 }

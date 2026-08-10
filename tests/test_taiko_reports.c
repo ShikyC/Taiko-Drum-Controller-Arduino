@@ -40,20 +40,20 @@ static void test_arcade_report(void) {
         // Drum buttons must not be folded into Arcade mode.
         .drum_buttons = TAIKO_DRUM_LEFT_DON | TAIKO_DRUM_RIGHT_DON |
                         TAIKO_DRUM_LEFT_KA | TAIKO_DRUM_RIGHT_KA,
-        .arcade_x = 100,
-        .arcade_y = -101,
-        .arcade_rx = 102,
-        .arcade_ry = -103,
+        .arcade_p1_x = 100,
+        .arcade_p1_y = -101,
+        .arcade_p2_x = 102,
+        .arcade_p2_y = -103,
     };
     taiko_arcade_report_t report;
     taiko_build_arcade_report(&input, &report);
 
+    // P1 occupies the first axis pair and P2 the second, so the host sees
+    // them as axes 0/1 and 2/3 respectively.
     assert(report.x == 100);
     assert(report.y == -101);
-    assert(report.z == 0);
-    assert(report.rz == 0);
-    assert(report.rx == 102);
-    assert(report.ry == -103);
+    assert(report.z == 102);
+    assert(report.rz == -103);
     assert(report.hat == TAIKO_HAT_UP_RIGHT);
     assert(report.buttons == 0x1fdbU);
 }
@@ -206,11 +206,11 @@ static void test_activity_detection(void) {
     assert(!taiko_input_has_activity(&input, TAIKO_CONTROLLER_MODE_ARCADE));
     assert(!taiko_input_has_activity(&input, TAIKO_CONTROLLER_MODE_PC));
 
-    input.arcade_rx = -1;
+    input.arcade_p2_x =-1;
     assert(taiko_input_has_activity(&input, TAIKO_CONTROLLER_MODE_ARCADE));
     assert(!taiko_input_has_activity(&input, TAIKO_CONTROLLER_MODE_PC));
 
-    input.arcade_rx = 0;
+    input.arcade_p2_x =0;
     input.drum_buttons = TAIKO_DRUM_RIGHT_KA;
     assert(!taiko_input_has_activity(&input, TAIKO_CONTROLLER_MODE_ARCADE));
     assert(taiko_input_has_activity(&input, TAIKO_CONTROLLER_MODE_PC));

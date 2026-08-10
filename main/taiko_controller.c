@@ -503,9 +503,9 @@ static void apply_arcade_output(taiko_input_snapshot_t *input, int player,
     }
 
     int8_t *horizontal =
-        player == 0 ? &input->arcade_x : &input->arcade_rx;
+        player == 0 ? &input->arcade_p1_x : &input->arcade_p2_x;
     int8_t *vertical =
-        player == 0 ? &input->arcade_y : &input->arcade_ry;
+        player == 0 ? &input->arcade_p1_y : &input->arcade_p2_y;
     const int8_t value = (int8_t)output.axis_value;
     switch (output.zone) {
         case TAIKO_ZONE_LEFT_DON:
