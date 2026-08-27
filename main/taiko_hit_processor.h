@@ -36,6 +36,32 @@ typedef struct {
     uint8_t rearm_samples;
     uint16_t output_hold_samples;
     uint8_t minimum_axis;
+    /* Crosstalk discrimination. A zone may only trigger while its level
+     * dominates every other channel's level (armed or not) by this Q8 ratio,
+     * the classic pad-module XTalk amplitude comparison. */
+    uint16_t crosstalk_ratio_q8;
+    /* Attack (onset) gating. The level must exceed attack_ratio_q8 times a
+     * peak-hold envelope of itself plus attack_margin. The hold tracks the
+     * level almost instantly upward and leaks away slowly, so decaying tails
+     * and beating humps (always below their own recent peak) never pass a
+     * fresh onset. */
+    uint16_t attack_ratio_q8;
+    uint16_t attack_margin;
+    uint8_t hold_attack_shift; /* hold rises with coeff 1 / 2^shift */
+    uint8_t hold_release_shift; /* hold leaks with coeff 1 / 2^shift */
+    /* Dead time after an emission, in samples: the struck zone is held by
+     * mask_samples (retrigger cancel) while every other zone is held by
+     * crosstalk_mask_samples, rejecting the mechanical wave that travels to
+     * neighbouring sensors a few milliseconds later. */
+    uint16_t mask_samples;
+    uint16_t crosstalk_mask_samples;
+    /* Onset sharpness (spectral tilt) gating. A stick strike injects
+     * broadband high-frequency energy, so its per-sample differences are
+     * large relative to its amplitude; the slow low-frequency packet that a
+     * long-tail drum radiates into its neighbours is not. A trigger requires
+     * sqrt(mean(diff^2)) >= min_sharpness_q8/256 * level. */
+    uint16_t min_sharpness_q8;
+    uint8_t sharpness_samples;
 } taiko_hit_config_t;
 
 typedef struct {
@@ -53,7 +79,6 @@ typedef struct {
 typedef enum {
     TAIKO_DETECTOR_IDLE = 0,
     TAIKO_DETECTOR_CAPTURE,
-    TAIKO_DETECTOR_REFRACTORY,
 } taiko_detector_state_t;
 
 typedef struct {
@@ -61,16 +86,25 @@ typedef struct {
     int32_t baseline_q8[TAIKO_CHANNELS_PER_PLAYER];
     uint64_t energy_ring[TAIKO_CHANNELS_PER_PLAYER][TAIKO_MAX_INTEGRATION_SAMPLES];
     uint64_t energy_sum[TAIKO_CHANNELS_PER_PLAYER];
+    uint64_t diff_ring[TAIKO_CHANNELS_PER_PLAYER][TAIKO_MAX_INTEGRATION_SAMPLES];
+    uint64_t diff_sum[TAIKO_CHANNELS_PER_PLAYER];
+    uint16_t prev_amplitude[TAIKO_CHANNELS_PER_PLAYER];
     uint8_t ring_index;
     uint8_t ring_count;
+    uint8_t diff_ring_index;
+    uint8_t diff_ring_count;
     bool baseline_initialized;
 
     taiko_detector_state_t detector_state;
     uint8_t capture_remaining;
-    uint16_t refractory_remaining;
-    uint8_t quiet_samples;
+    uint16_t refractory_remaining[TAIKO_CHANNELS_PER_PLAYER];
+    uint8_t quiet_samples[TAIKO_CHANNELS_PER_PLAYER];
+    bool zone_armed[TAIKO_CHANNELS_PER_PLAYER];
     taiko_zone_t candidate_zone;
     uint16_t candidate_level;
+    uint32_t hold_env_q8[TAIKO_CHANNELS_PER_PLAYER];
+    uint16_t raw_amplitude[TAIKO_CHANNELS_PER_PLAYER];
+    uint16_t zone_mask_remaining[TAIKO_CHANNELS_PER_PLAYER];
 
     taiko_hit_output_t output;
     uint16_t output_remaining;

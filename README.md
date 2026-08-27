@@ -73,8 +73,8 @@ mode:
 - `USB_REPORT_INTERVAL_US`: `1000`
 - detector integration and capture latency: about `1.73 ms`
 - output hold: `12 ms`
-- standard-profile refractory interval: `12 ms`
-- long-tail-profile refractory interval: `72 ms`
+- standard-profile per-zone refractory interval: `12 ms`
+- long-tail-profile per-zone refractory interval: `19.2 ms`
 
 Each player has four zones:
 
@@ -135,8 +135,8 @@ The four active-low DIP poles are sampled once during startup:
 
 | DIP | ESP32-S3 GPIO/IO | WROOM module pin | ON behavior |
 | --- | ---: | ---: | --- |
-| 1 | **39** | **32** | P1 72 ms long-tail detector profile |
-| 2 | 40 | 33 | P2 72 ms long-tail detector profile |
+| 1 | **39** | **32** | P1 firm/long-tail detector profile |
+| 2 | 40 | 33 | P2 firm/long-tail detector profile |
 | 3 | 41 | 34 | Mode bit 0 |
 | 4 | 42 | 35 | Mode bit 1 |
 
@@ -310,6 +310,17 @@ cc -std=c11 -Wall -Wextra -Werror -I main \
 /tmp/test_taiko_ps4_auth_protocol
 ```
 
+The detector has a host-side rapid-hit regression test covering every ordered
+pair of left Don, left Ka, right Don, and right Ka at 261 scans (`25.056 ms`),
+including a new strike while the previous zone still has a tail:
+
+```sh
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  tests/test_taiko_hit_processor.c main/taiko_hit_processor.c \
+  -o /tmp/test_taiko_hit_processor
+/tmp/test_taiko_hit_processor
+```
+
 ![Online tool](./images/online_tool.png)
 
 ## Controller Output
@@ -385,15 +396,24 @@ for P1 and DIP2 for P2. An open/OFF pole selects the standard profile; ON
 selects long-tail. DIP2 has an effect only in two-player Arcade mode because
 the other controller modes do not sample or initialize P2.
 
-The standard profile uses the selected sensitivity preset and a 12 ms
-refractory interval. The long-tail profile uses firm thresholds and a 72 ms
-refractory interval so that the noisier decay remains part of the original
-strike instead of becoming extra hits. The DIP values are latched before the
-processors start. Profile selection only changes each processor's
-initialization data; it adds no work, task, or synchronization to the
-real-time ADC loop.
+The standard profile uses the selected sensitivity preset and a 12 ms per-zone
+refractory interval. The long-tail profile uses firm thresholds and a 19.2 ms
+per-zone refractory interval. A hit disarms only the sensor channels that are
+still participating in that vibration; every channel then rearms independently
+after its own signal becomes quiet. Consequently, a decaying right-side signal
+cannot block a new left-side hit, and all clean same-zone or cross-zone pairs
+more than 25 ms apart fit within the detector limit. The DIP values are latched
+before the processors start. Profile selection only changes each processor's
+initialization data; it adds no task or synchronization to the real-time ADC
+loop.
 
-Host replay tested 100 ADC start phases in both supported channel orders. The standard profile recognized all 6,400 phase-augmented 1P hits with no wrong zones, misses, or false positives; the long-tail profile did the same for all 6,400 2P hits. These captures contain isolated strikes. Because the 72 ms interval intentionally limits the long-tail profile to roughly 14 distinct hits per second per player, dense rolls should be recorded and added to the acceptance corpus before reducing it.
+The earlier isolated-hit corpus result was 6,400/6,400 correct for each profile
+across 100 ADC start phases and both supported channel orders. That result used
+the former shared 72 ms long-tail lockout and therefore is not evidence for the
+new rapid-hit behavior. The checked-in host regression now covers every ordered
+zone pair at 25.056 ms and persistent first-zone tails. Dense-roll captures
+should still be replayed before treating those synthetic tests as physical-drum
+validation.
 
 ## Signal Conditioning Notes
 
