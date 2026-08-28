@@ -115,7 +115,6 @@ static const gpio_num_t kDipGpios[4] = {
 #define ADC_READ_TIMEOUT_MS 2
 #define ADC_ATTEN_DB ADC_ATTEN_DB_12
 #define ADC_BIT_WIDTH ADC_BITWIDTH_12
-#define HIT_SENSITIVITY TAIKO_SENSITIVITY_BALANCED
 #define ADC_RAW_LEVELS (1U << 12)
 #define NOMINAL_ADC_FULL_SCALE_MV 3100U
 
@@ -575,10 +574,11 @@ void app_main(void) {
     for (int player = 0; player < s_active_players; ++player) {
         const uint8_t profile_switch =
             player == 0 ? DIP_P1_LONG_TAIL : DIP_P2_LONG_TAIL;
+        // DIP1/DIP2 pick the drum type only; sensitivity is the host's.
         const taiko_hit_config_t hit_config =
             (s_dip_switches & profile_switch) != 0
                 ? taiko_hit_long_tail_config()
-                : taiko_hit_config_for_sensitivity(HIT_SENSITIVITY);
+                : taiko_hit_default_config();
         taiko_hit_processor_init(&s_hit_processors[player], &hit_config);
     }
     // The indicator is deliberately optional; ADC and HID operation continues

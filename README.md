@@ -72,9 +72,10 @@ mode:
 - actual per-channel rate: `10416.667` samples/s
 - `USB_REPORT_INTERVAL_US`: `1000`
 - detector integration and capture latency: about `1.73 ms`
-- output hold: `12 ms`
+- output hold: `19.2 ms` (must outlast one 60 fps game frame)
 - standard-profile per-zone refractory interval: `12 ms`
 - long-tail-profile per-zone refractory interval: `19.2 ms`
+- convolution window: `0.96 ms` standard, `2.30 ms` long-tail
 
 Each player has four zones:
 
@@ -135,8 +136,8 @@ The four active-low DIP poles are sampled once during startup:
 
 | DIP | ESP32-S3 GPIO/IO | WROOM module pin | ON behavior |
 | --- | ---: | ---: | --- |
-| 1 | **39** | **32** | P1 firm/long-tail detector profile |
-| 2 | 40 | 33 | P2 firm/long-tail detector profile |
+| 1 | **39** | **32** | P1 long-tail drum type |
+| 2 | 40 | 33 | P2 long-tail drum type |
 | 3 | 41 | 34 | Mode bit 0 |
 | 4 | 42 | 35 | Mode bit 1 |
 
@@ -378,27 +379,37 @@ drum output is a normal button press:
 | Right ka | R1 | RB | R | R1 |
 
 Buttons require five consecutive 1 ms samples before a transition is
-published. Drum buttons use the detector's existing 12 ms output hold and are
+published. Drum buttons use the detector's existing 19.2 ms output hold and are
 not subject to GPIO debounce. Opposite physical D-pad directions cancel.
 
 ## Tuning
 
-Choose the compile-time preset in [`main/taiko_controller.c`](./main/taiko_controller.c):
+There are no compile-time sensitivity presets. The board ships with uniform
+per-channel gains and one set of amplitude thresholds; sensitivity is meant to
+be measured against a real drum and set from the host rather than guessed at
+build time. The remaining constants live in
+[`main/taiko_hit_processor.c`](./main/taiko_hit_processor.c).
 
-```c
-#define HIT_SENSITIVITY TAIKO_SENSITIVITY_BALANCED
-```
+DIP1 and DIP2 select the **drum type** for P1 and P2 respectively, and nothing
+else. An open/OFF pole selects the standard drum; ON selects an old long-tail
+drum. DIP2 has an effect only in two-player Arcade mode because the other
+controller modes do not sample or initialize P2.
 
-Available presets are `TAIKO_SENSITIVITY_SENSITIVE`, `TAIKO_SENSITIVITY_BALANCED`, and `TAIKO_SENSITIVITY_FIRM`. They differ in incidental-contact rejection and axis scaling; Balanced is the default. The thresholds and per-channel gains live in [`main/taiko_hit_processor.c`](./main/taiko_hit_processor.c).
+The two types are distinguished by the shape of their waveform, so what the
+DIP actually selects is the length of the sliding-window convolution the
+envelope is built from: `10` scans (`0.96 ms`) for a standard drum, `24` scans
+(`2.30 ms`) for a long-tail one, whose strike decays into a train of beating
+humps that a short window would present as separate onsets. Onset latency
+grows with the window, measured at `1.63 ms` either way for a firm hit and
+`1.82` vs `1.92 ms` for a soft one.
 
-Select the standard or long-tail processing profile independently with DIP1
-for P1 and DIP2 for P2. An open/OFF pole selects the standard profile; ON
-selects long-tail. DIP2 has an effect only in two-player Arcade mode because
-the other controller modes do not sample or initialize P2.
+Because the longer window averages more of the decay, the same physical strike
+reports a lower level on the long-tail profile than on the standard one; the
+host-side per-channel gain is what normalizes that.
 
-The standard profile uses the selected sensitivity preset and a 12 ms per-zone
-refractory interval. The long-tail profile uses firm thresholds and a 19.2 ms
-per-zone refractory interval. A hit disarms only the sensor channels that are
+The long-tail profile also carries the timing gates its ringing needs: a
+`19.2 ms` per-zone refractory interval against the standard `12 ms`, a longer
+crosstalk mask, and a lower sharpness floor. A hit disarms only the sensor channels that are
 still participating in that vibration; every channel then rearms independently
 after its own signal becomes quiet. Consequently, a decaying right-side signal
 cannot block a new left-side hit, and all clean same-zone or cross-zone pairs

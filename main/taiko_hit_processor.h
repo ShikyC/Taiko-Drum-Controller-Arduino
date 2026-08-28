@@ -9,7 +9,7 @@ extern "C" {
 #endif
 
 #define TAIKO_CHANNELS_PER_PLAYER 4
-#define TAIKO_MAX_INTEGRATION_SAMPLES 16
+#define TAIKO_MAX_INTEGRATION_SAMPLES 32
 
 typedef enum {
     TAIKO_ZONE_LEFT_DON = 0,
@@ -18,18 +18,20 @@ typedef enum {
     TAIKO_ZONE_RIGHT_KA = 3,
 } taiko_zone_t;
 
-typedef enum {
-    TAIKO_SENSITIVITY_SENSITIVE = 0,
-    TAIKO_SENSITIVITY_BALANCED,
-    TAIKO_SENSITIVITY_FIRM,
-} taiko_sensitivity_t;
-
 typedef struct {
     uint16_t noise_floor;
     uint16_t trigger_level;
     uint16_t release_level;
     uint16_t full_scale_level;
+    /* Per-channel amplitude trim. The board ships these uniform: sensitivity
+     * is the host's to set over the config channel, not something baked in
+     * per sensor here. */
     uint16_t channel_gain_q8[TAIKO_CHANNELS_PER_PLAYER];
+    /* Length of the sliding-window convolution the envelope is built from.
+     * This is what separates the two drum types: a standard drum needs a
+     * short window to keep onsets crisp, while an old long-tail drum needs a
+     * longer one so its ringing decay smooths into a single envelope instead
+     * of a train of humps. DIP1 and DIP2 select it per player. */
     uint8_t integration_samples;
     uint8_t capture_samples;
     uint16_t refractory_samples;
@@ -126,10 +128,11 @@ typedef struct {
     uint8_t output_last_axis;
 } taiko_hit_processor_t;
 
-taiko_hit_config_t taiko_hit_config_for_sensitivity(
-    taiko_sensitivity_t sensitivity);
-taiko_hit_config_t taiko_hit_long_tail_config(void);
+/* Standard drum: short convolution window. */
 taiko_hit_config_t taiko_hit_default_config(void);
+/* Old long-tail drum: longer convolution window plus the timing gates its
+ * ringing needs. Amplitude settings are identical to the standard profile. */
+taiko_hit_config_t taiko_hit_long_tail_config(void);
 void taiko_hit_processor_init(taiko_hit_processor_t *processor,
                               const taiko_hit_config_t *config);
 bool taiko_hit_processor_push(taiko_hit_processor_t *processor,

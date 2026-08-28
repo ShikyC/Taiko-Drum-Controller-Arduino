@@ -7,6 +7,10 @@
 #define BASELINE_TRACK_SHIFT 10
 #define BASELINE_TRACK_MARGIN 36U
 #define NOISY_PROFILE_REFRACTORY_SAMPLES 200U
+/* Convolution window per drum type, in ADC scans (10,416.667 scans/s):
+ * 0.96 ms for a standard drum, 2.30 ms for an old long-tail one. */
+#define STANDARD_INTEGRATION_SAMPLES 10U
+#define LONG_TAIL_INTEGRATION_SAMPLES 24U
 
 static uint32_t integer_sqrt_u64(uint64_t value) {
     uint64_t bit = 1ULL << 62;
@@ -44,20 +48,16 @@ static uint8_t level_to_axis(const taiko_hit_config_t *config, uint16_t level) {
     return (uint8_t)(config->minimum_axis + scaled);
 }
 
-taiko_hit_config_t taiko_hit_config_for_sensitivity(
-    taiko_sensitivity_t sensitivity) {
+taiko_hit_config_t taiko_hit_default_config(void) {
     taiko_hit_config_t config = {
         .noise_floor = 18,
         .trigger_level = 48,
         .release_level = 34,
         .full_scale_level = 1360,
-        .channel_gain_q8 = {
-            Q8_ONE,
-            2U * Q8_ONE,
-            Q8_ONE,
-            (3U * Q8_ONE) / 2U,
-        },
-        .integration_samples = 10,
+        // Uniform by design. Per-sensor trim belongs to the host, which can
+        // measure a real drum instead of guessing at build time.
+        .channel_gain_q8 = {Q8_ONE, Q8_ONE, Q8_ONE, Q8_ONE},
+        .integration_samples = STANDARD_INTEGRATION_SAMPLES,
         .capture_samples = 16,
         .refractory_samples = 125,
         .rearm_samples = 16,
@@ -78,33 +78,18 @@ taiko_hit_config_t taiko_hit_config_for_sensitivity(
         .sharpness_samples = 16,
     };
 
-    switch (sensitivity) {
-        case TAIKO_SENSITIVITY_SENSITIVE:
-            config.noise_floor = 12;
-            config.trigger_level = 40;
-            config.release_level = 27;
-            config.full_scale_level = 1135;
-            break;
-        case TAIKO_SENSITIVITY_FIRM:
-            config.noise_floor = 24;
-            config.trigger_level = 70;
-            config.release_level = 49;
-            config.full_scale_level = 1665;
-            break;
-        case TAIKO_SENSITIVITY_BALANCED:
-        default:
-            break;
-    }
     return config;
 }
 
-taiko_hit_config_t taiko_hit_default_config(void) {
-    return taiko_hit_config_for_sensitivity(TAIKO_SENSITIVITY_BALANCED);
-}
-
 taiko_hit_config_t taiko_hit_long_tail_config(void) {
-    taiko_hit_config_t config =
-        taiko_hit_config_for_sensitivity(TAIKO_SENSITIVITY_FIRM);
+    taiko_hit_config_t config = taiko_hit_default_config();
+
+    // The defining difference between the two drum types. The old drum's
+    // strike decays into a long train of beating humps; a longer convolution
+    // window folds that into one envelope so the gates below see a single
+    // onset. Onset latency grows with the window, so this stays far short of
+    // the ~14 ms boxcar the ATmega build could afford.
+    config.integration_samples = LONG_TAIL_INTEGRATION_SAMPLES;
 
     // At 10,416.667 complete scans/s this is 19.2 ms. This leaves enough time
     // for capture and USB publication before the 25 ms consecutive-hit limit.
@@ -122,9 +107,9 @@ taiko_hit_config_t taiko_hit_long_tail_config(void) {
     config.min_sharpness_q8 = 46; /* 0.18 */
     config.sharpness_samples = 16;
     // The long-tail drum transfers more energy to the neighbours, so weak
-    // swipe hits arrive on sensors that never fully settle; trigger a bit
-    // lower and lean on the crosstalk gates instead of raw threshold.
-    config.trigger_level = 60;
+    // swipe hits arrive on sensors that never fully settle; lean on the
+    // crosstalk gates rather than moving the amplitude thresholds, which are
+    // the host's to set.
     config.attack_ratio_q8 = 3U * Q8_ONE;
     config.attack_margin = 32;
     config.hold_attack_shift = 6;
