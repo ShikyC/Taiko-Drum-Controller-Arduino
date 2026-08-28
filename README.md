@@ -179,7 +179,12 @@ does not change the ADC input order.
 ## Requirements
 
 - ESP32-S3 development board with native USB device support.
-- ESP-IDF 5.x environment.
+- ESP-IDF **5.5.2 or newer**. The LED encoder in
+  [`main/taiko_hit_led.c`](./main/taiko_hit_led.c) uses
+  `RMT_ENCODER_FUNC_ATTR`, added in 5.5, and
+  `rmt_tx_channel_config_t.flags.init_level`, added in 5.5.2. Building against
+  an earlier 5.x fails in that file with errors that look unrelated to
+  whatever you were changing.
 - Four piezo sensors per drum, eight total for two-player support.
 
 The existing [`espressif/esp_tinyusb`](./main/idf_component.yml) dependency is
