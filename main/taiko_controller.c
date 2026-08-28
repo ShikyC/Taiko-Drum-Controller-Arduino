@@ -13,9 +13,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "hal/adc_types.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 #include "soc/soc_caps.h"
 #include "taiko_hit_led.h"
 #include "taiko_hit_processor.h"
+#include "taiko_host_config.h"
 #include "taiko_reports.h"
 #include "taiko_usb.h"
 
@@ -131,6 +134,13 @@ static TaskHandle_t s_adc_task_handle;
 static int8_t s_pattern_slot_by_adc_channel[SOC_ADC_CHANNEL_NUM(0)];
 static volatile bool s_adc_pool_overflow;
 static taiko_hit_processor_t s_hit_processors[PLAYERS];
+/* Host tuning. app_main owns the NVS side and bumps the generation; the ADC
+ * task is the only thing that writes into a live detector. */
+static taiko_host_config_t s_host_config;
+static portMUX_TYPE s_host_config_lock = portMUX_INITIALIZER_UNLOCKED;
+static volatile uint32_t s_host_config_generation;
+static uint32_t s_host_config_applied_generation;
+static bool s_host_config_stored;
 static uint32_t s_published_outputs[PLAYERS];
 static uint16_t s_adc_millivolts[ADC_RAW_LEVELS];
 static button_filter_t s_button_filters[CONTROLLER_INPUT_COUNT];
@@ -141,6 +151,93 @@ static int s_active_channels = TOTAL_CHANNELS;
 static uint32_t s_adc_conversion_rate_hz =
     ADC_ARCADE_REQUESTED_CONVERSION_RATE_HZ;
 static uint32_t s_dma_frame_bytes = MAX_DMA_FRAME_BYTES;
+
+#define HOST_CONFIG_NVS_NAMESPACE "taiko"
+#define HOST_CONFIG_NVS_KEY "tuning"
+
+/* What the board is actually running, so a read-back cannot disagree with it. */
+static uint8_t host_config_status(void) {
+    uint8_t status = 0;
+    if ((s_dip_switches & DIP_P1_LONG_TAIL) != 0) {
+        status |= TAIKO_HOST_CONFIG_STATUS_P1_LONG_TAIL;
+    }
+    if ((s_dip_switches & DIP_P2_LONG_TAIL) != 0) {
+        status |= TAIKO_HOST_CONFIG_STATUS_P2_LONG_TAIL;
+    }
+    if (s_host_config_stored) {
+        status |= TAIKO_HOST_CONFIG_STATUS_STORED;
+    }
+    if (s_active_players > 1) {
+        status |= TAIKO_HOST_CONFIG_STATUS_TWO_PLAYERS;
+    }
+    return status;
+}
+
+static bool load_host_config(taiko_host_config_t *config) {
+    nvs_handle_t handle;
+    if (nvs_open(HOST_CONFIG_NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+        return false;
+    }
+    size_t size = sizeof(*config);
+    const esp_err_t err = nvs_get_blob(handle, HOST_CONFIG_NVS_KEY, config, &size);
+    nvs_close(handle);
+    if (err != ESP_OK || size != sizeof(*config)) {
+        return false;
+    }
+    // Stored bytes are no more trusted than wire bytes; a firmware whose
+    // ranges have moved must not inherit an out-of-range tuning.
+    taiko_host_config_clamp(config);
+    return true;
+}
+
+static bool save_host_config(const taiko_host_config_t *config) {
+    nvs_handle_t handle;
+    if (nvs_open(HOST_CONFIG_NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) {
+        return false;
+    }
+    esp_err_t err = nvs_set_blob(handle, HOST_CONFIG_NVS_KEY, config, sizeof(*config));
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Could not persist host tuning: %s", esp_err_to_name(err));
+        return false;
+    }
+    return true;
+}
+
+static bool erase_host_config(void) {
+    nvs_handle_t handle;
+    if (nvs_open(HOST_CONFIG_NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) {
+        return false;
+    }
+    esp_err_t err = nvs_erase_key(handle, HOST_CONFIG_NVS_KEY);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        err = ESP_OK;
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    return err == ESP_OK;
+}
+
+static void initialize_host_config(void) {
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "NVS unavailable (%s); host tuning will not persist",
+                 esp_err_to_name(err));
+    }
+    s_host_config_stored = err == ESP_OK && load_host_config(&s_host_config);
+    if (!s_host_config_stored) {
+        taiko_host_config_defaults(&s_host_config);
+    }
+}
 
 /********* V2 digital controls ***************/
 
@@ -430,6 +527,19 @@ static void adc_reader_task(void *argument) {
 
     while (true) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        // Only amplitude fields are host-writable, so this never resizes a
+        // ring or disturbs detector state; it is safe between frames.
+        if (s_host_config_generation != s_host_config_applied_generation) {
+            taiko_host_config_t tuning;
+            portENTER_CRITICAL(&s_host_config_lock);
+            tuning = s_host_config;
+            s_host_config_applied_generation = s_host_config_generation;
+            portEXIT_CRITICAL(&s_host_config_lock);
+            for (int player = 0; player < s_active_players; ++player) {
+                taiko_host_config_apply(&tuning.player[player],
+                                        &s_hit_processors[player].config);
+            }
+        }
         if (__atomic_exchange_n(
                 &s_adc_pool_overflow, false, __ATOMIC_ACQ_REL)) {
             ESP_LOGW(TAG, "ADC DMA pool overflow");
@@ -563,7 +673,9 @@ static void usb_report_timer_cb(void *argument) {
 
 void app_main(void) {
     initialize_board_inputs();
+    initialize_host_config();
     ESP_ERROR_CHECK(taiko_usb_install(s_controller_mode));
+    taiko_usb_publish_host_config(&s_host_config, host_config_status());
     if (s_controller_mode == TAIKO_CONTROLLER_MODE_PS4 &&
         !taiko_usb_ps4_authentication_available()) {
         ESP_LOGW(TAG,
@@ -575,10 +687,12 @@ void app_main(void) {
         const uint8_t profile_switch =
             player == 0 ? DIP_P1_LONG_TAIL : DIP_P2_LONG_TAIL;
         // DIP1/DIP2 pick the drum type only; sensitivity is the host's.
-        const taiko_hit_config_t hit_config =
+        taiko_hit_config_t hit_config =
             (s_dip_switches & profile_switch) != 0
                 ? taiko_hit_long_tail_config()
                 : taiko_hit_default_config();
+        // Drum type from the switch, sensitivity from the host.
+        taiko_host_config_apply(&s_host_config.player[player], &hit_config);
         taiko_hit_processor_init(&s_hit_processors[player], &hit_config);
     }
     // The indicator is deliberately optional; ADC and HID operation continues
@@ -615,7 +729,25 @@ void app_main(void) {
     ESP_ERROR_CHECK(
         esp_timer_start_periodic(hid_timer, USB_REPORT_INTERVAL_US));
 
+    // Host writes are drained here rather than in the USB callback: applying
+    // lands on the ADC task, and an NVS commit can block for tens of
+    // milliseconds, which must never happen on the real-time path.
     while (true) {
-        vTaskDelay(portMAX_DELAY);
+        taiko_host_config_t staged;
+        uint8_t command;
+        if (taiko_usb_take_host_config(&staged, &command)) {
+            portENTER_CRITICAL(&s_host_config_lock);
+            s_host_config = staged;
+            s_host_config_generation++;
+            portEXIT_CRITICAL(&s_host_config_lock);
+
+            if (command == TAIKO_HOST_CONFIG_CMD_SAVE) {
+                s_host_config_stored = save_host_config(&staged);
+            } else if (command == TAIKO_HOST_CONFIG_CMD_RESET) {
+                s_host_config_stored = !erase_host_config();
+            }
+            taiko_usb_publish_host_config(&staged, host_config_status());
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
 }

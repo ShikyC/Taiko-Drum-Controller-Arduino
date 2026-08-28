@@ -62,13 +62,15 @@ set(TAIKO_PRIVATE_REQUIRES
     esp_driver_rmt
     bootloader_support
     esp_hw_support
-    mbedtls)
+    mbedtls
+    nvs_flash)
 
 idf_component_register(
     SRCS
         "taiko_controller.c"
         "taiko_hit_led.c"
         "taiko_hit_processor.c"
+        "taiko_host_config.c"
         "taiko_ps4_auth.c"
         "taiko_ps4_auth_protocol.c"
         "taiko_reports.c"

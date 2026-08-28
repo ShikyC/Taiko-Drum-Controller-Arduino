@@ -322,6 +322,16 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
 /tmp/test_taiko_hit_processor
 ```
 
+The host tuning wire format has its own round-trip, clamping, and
+reset-command coverage:
+
+```sh
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  tests/test_taiko_host_config.c main/taiko_host_config.c \
+  main/taiko_hit_processor.c -o /tmp/test_taiko_host_config
+/tmp/test_taiko_host_config
+```
+
 ![Online tool](./images/online_tool.png)
 
 ## Controller Output
@@ -389,6 +399,29 @@ per-channel gains and one set of amplitude thresholds; sensitivity is meant to
 be measured against a real drum and set from the host rather than guessed at
 build time. The remaining constants live in
 [`main/taiko_hit_processor.c`](./main/taiko_hit_processor.c).
+
+### Host tuning channel
+
+In Arcade mode the board exposes a vendor-defined HID **feature** report,
+report ID `0x10`, carrying 36 bytes: a schema version, a command, a status
+byte, then eight little-endian `uint16` per player -- four channel gains in
+Q8, then noise floor, trigger level, release level, and full-scale level. The
+wire format lives in
+[`main/taiko_host_config.c`](./main/taiko_host_config.c).
+
+Feature items add no Input items to the descriptor, so the gamepad axes and
+every host's mapping of them are unchanged. The channel is Arcade-only: the
+PS4 and Switch descriptors must stay byte-exact for authentication and console
+enumeration, and PC/XInput mode has no HID interface.
+
+A write is staged by the USB callback and applied by the ADC task between
+frames; only amplitude fields are writable, so an apply never resizes a ring
+or disturbs detector state. Values are clamped on the way in and again on the
+way out of storage, so neither a hostile host nor a tuning saved by older
+firmware can leave the detector unable to trigger. Command `0` applies live,
+`1` also persists to NVS, and `2` restores defaults and forgets the stored
+copy. Edits are deliberately not persisted automatically: a bad tune should
+not survive a power cycle by accident.
 
 DIP1 and DIP2 select the **drum type** for P1 and P2 respectively, and nothing
 else. An open/OFF pole selects the standard drum; ON selects an old long-tail

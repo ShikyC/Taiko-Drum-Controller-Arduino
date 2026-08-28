@@ -18,6 +18,7 @@
 #include "device/usbd_pvt.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "taiko_host_config.h"
 #include "taiko_ps4_auth.h"
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
@@ -46,6 +47,12 @@ enum {
 static taiko_controller_mode_t s_mode = TAIKO_CONTROLLER_MODE_ARCADE;
 static taiko_input_snapshot_t s_last_input;
 static portMUX_TYPE s_last_input_lock = portMUX_INITIALIZER_UNLOCKED;
+static taiko_host_config_t s_host_config;
+static uint8_t s_host_config_status;
+static taiko_host_config_t s_pending_host_config;
+static uint8_t s_pending_host_command;
+static bool s_host_config_pending;
+static portMUX_TYPE s_host_config_lock = portMUX_INITIALIZER_UNLOCKED;
 static taiko_arcade_report_t s_arcade_report;
 static taiko_xinput_report_t s_xinput_report;
 static taiko_switch_report_t s_switch_report;
@@ -181,6 +188,17 @@ static const uint8_t kArcadeReportDescriptor[] = {
         HID_REPORT_COUNT(32),
         HID_REPORT_SIZE(1),
         HID_INPUT(HID_DATA | HID_VARIABLE | HID_ABSOLUTE),
+        // Vendor-defined tuning channel. Feature items only: the descriptor
+        // gains no Input items, so every host's view of the axes above -- and
+        // in particular SDL's mapping for the arcade loader -- is unchanged.
+        HID_REPORT_ID(TAIKO_HOST_CONFIG_REPORT_ID)
+        HID_USAGE_PAGE_N(0xFF00, 2),
+        HID_USAGE(0x01),
+        HID_LOGICAL_MIN(0),
+        HID_LOGICAL_MAX_N(255, 2),
+        HID_REPORT_SIZE(8),
+        HID_REPORT_COUNT(TAIKO_HOST_CONFIG_REPORT_SIZE),
+        HID_FEATURE(HID_DATA | HID_VARIABLE | HID_ABSOLUTE),
     HID_COLLECTION_END,
 };
 
@@ -699,6 +717,19 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id,
         return ps4_get_feature_report(report_id, buffer, requested_length);
     }
 
+    if (s_mode == TAIKO_CONTROLLER_MODE_ARCADE &&
+        report_type == HID_REPORT_TYPE_FEATURE &&
+        report_id == TAIKO_HOST_CONFIG_REPORT_ID) {
+        taiko_host_config_t config;
+        uint8_t status;
+        portENTER_CRITICAL(&s_host_config_lock);
+        config = s_host_config;
+        status = s_host_config_status;
+        portEXIT_CRITICAL(&s_host_config_lock);
+        return (uint16_t)taiko_host_config_serialize(&config, status, buffer,
+                                                     requested_length);
+    }
+
     if (report_type != HID_REPORT_TYPE_INPUT) {
         return 0;
     }
@@ -744,6 +775,23 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
             (void)taiko_ps4_auth_set_nonce(buffer, buffer_size);
         }
     }
+    if (s_mode == TAIKO_CONTROLLER_MODE_ARCADE &&
+        report_type == HID_REPORT_TYPE_FEATURE &&
+        report_id == TAIKO_HOST_CONFIG_REPORT_ID) {
+        taiko_host_config_t parsed;
+        uint8_t command;
+        if (taiko_host_config_deserialize(buffer, buffer_size, &parsed, &command)) {
+            // Staged rather than applied here: this runs on the USB task while
+            // the ADC task owns the detectors.
+            portENTER_CRITICAL(&s_host_config_lock);
+            s_pending_host_config = parsed;
+            s_pending_host_command = command;
+            s_host_config_pending = true;
+            portEXIT_CRITICAL(&s_host_config_lock);
+        }
+        return;
+    }
+
     // Rumble, light-bar, and player-LED outputs are accepted by the endpoints
     // but intentionally do not drive the per-hit LED chain.
 }
@@ -876,6 +924,27 @@ bool taiko_usb_send(const taiko_input_snapshot_t *input) {
             return false;
     }
     return false;
+}
+
+void taiko_usb_publish_host_config(const taiko_host_config_t *config,
+                                   uint8_t status) {
+    portENTER_CRITICAL(&s_host_config_lock);
+    s_host_config = *config;
+    s_host_config_status = status;
+    portEXIT_CRITICAL(&s_host_config_lock);
+}
+
+bool taiko_usb_take_host_config(taiko_host_config_t *config, uint8_t *command) {
+    bool pending;
+    portENTER_CRITICAL(&s_host_config_lock);
+    pending = s_host_config_pending;
+    if (pending) {
+        *config = s_pending_host_config;
+        *command = s_pending_host_command;
+        s_host_config_pending = false;
+    }
+    portEXIT_CRITICAL(&s_host_config_lock);
+    return pending;
 }
 
 bool taiko_usb_ps4_authentication_available(void) {
