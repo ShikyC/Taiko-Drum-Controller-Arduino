@@ -399,7 +399,9 @@ _Static_assert(sizeof(kSwitchConfigurationDescriptor) ==
                "Switch configuration descriptor length changed");
 _Static_assert(sizeof(kPs4ConfigurationDescriptor) == PS4_CONFIG_LENGTH,
                "PS4 configuration descriptor length changed");
-_Static_assert(sizeof(kArcadeReportDescriptor) == 64,
+/* 64 bytes of gamepad, then 18 for the tuning feature report. Split so a
+ * change to either half is obvious from the diff. */
+_Static_assert(sizeof(kArcadeReportDescriptor) == 64 + 18,
                "Arcade report descriptor length changed");
 _Static_assert(sizeof(kSwitchReportDescriptor) == 86,
                "Switch report descriptor length changed");
