@@ -61,7 +61,11 @@ taiko_hit_config_t taiko_hit_config_for_sensitivity(
         .capture_samples = 16,
         .refractory_samples = 125,
         .rearm_samples = 16,
-        .output_hold_samples = 125,
+        // 19.2 ms at 10,416.667 scans/s. A 60 fps game poll (16.7 ms) is then
+        // guaranteed to land inside the event with ~15% margin, while still
+        // clearing the 25 ms consecutive-hit budget the tests pin.
+        .output_hold_samples = 200,
+        .output_decay_shift = 12,
         .minimum_axis = 8,
         .crosstalk_ratio_q8 = (3U * Q8_ONE) / 2U,
         .attack_ratio_q8 = (5U * Q8_ONE) / 2U,
@@ -152,6 +156,11 @@ void taiko_hit_processor_init(taiko_hit_processor_t *processor,
     if (processor->config.output_hold_samples == 0) {
         processor->config.output_hold_samples = 1;
     }
+    if (processor->config.output_decay_shift < 1) {
+        processor->config.output_decay_shift = 1;
+    } else if (processor->config.output_decay_shift > 24) {
+        processor->config.output_decay_shift = 24;
+    }
     if (processor->config.full_scale_level <= processor->config.trigger_level) {
         processor->config.full_scale_level = processor->config.trigger_level + 1;
     }
@@ -165,17 +174,61 @@ void taiko_hit_processor_init(taiko_hit_processor_t *processor,
     }
 }
 
-static void update_output_hold(taiko_hit_processor_t *processor) {
+static void end_output(taiko_hit_processor_t *processor) {
+    processor->output.active = false;
+    processor->output.axis_value = 0;
+    processor->output_level_q8 = 0;
+    processor->output_peak_level = 0;
+    processor->output_last_axis = 0;
+}
+
+/* Shape the axis while a hit is live instead of freezing one number for the
+ * whole hold. A constant is the worst thing to hand this game: it carries no
+ * change for the poll to latch onto, and the arcade loader has to fake a
+ * varying value for exactly that reason. */
+static void update_output_envelope(
+    taiko_hit_processor_t *processor,
+    const uint16_t levels[TAIKO_CHANNELS_PER_PLAYER]) {
     if (processor->output_remaining == 0) {
-        processor->output.active = false;
-        processor->output.axis_value = 0;
+        end_output(processor);
         return;
     }
     processor->output_remaining--;
     if (processor->output_remaining == 0) {
-        processor->output.active = false;
-        processor->output.axis_value = 0;
+        end_output(processor);
+        return;
     }
+
+    uint32_t level_q8 = processor->output_level_q8;
+    level_q8 -= level_q8 >> processor->config.output_decay_shift;
+
+    // A drum still ringing holds its own envelope up; the droop only takes
+    // over once the zone has gone quiet. This is what the ATmega build got
+    // from its boxcar, and it is what long-tail drums need.
+    const uint32_t live_q8 = (uint32_t)levels[processor->output.zone] << 8;
+    if (live_q8 > level_q8) {
+        level_q8 = live_q8;
+    }
+    // Never report harder than the onset actually was: a later beating hump
+    // on the struck zone must not inflate the force the game classifies.
+    const uint32_t peak_q8 = (uint32_t)processor->output_peak_level << 8;
+    if (level_q8 > peak_q8) {
+        level_q8 = peak_q8;
+    }
+    processor->output_level_q8 = level_q8;
+
+    uint8_t axis =
+        level_to_axis(&processor->config, (uint16_t)(level_q8 >> 8));
+    // Insurance for the quantised tail, where the droop can be less than one
+    // axis step between polls: offset by one so the pair still differs. The
+    // next scan compares against this value, so it settles into an
+    // alternation rather than drifting.
+    if (axis == processor->output_last_axis) {
+        axis = axis > processor->config.minimum_axis ? (uint8_t)(axis - 1)
+                                                     : (uint8_t)(axis + 1);
+    }
+    processor->output_last_axis = axis;
+    processor->output.axis_value = axis;
 }
 
 static void update_baselines_and_levels(
@@ -381,6 +434,9 @@ static bool emit_candidate(
         .axis_value = axis_value,
     };
     processor->output_remaining = processor->config.output_hold_samples;
+    processor->output_peak_level = processor->candidate_level;
+    processor->output_level_q8 = (uint32_t)processor->candidate_level << 8;
+    processor->output_last_axis = axis_value;
     processor->detector_state = TAIKO_DETECTOR_IDLE;
     for (size_t channel = 0; channel < TAIKO_CHANNELS_PER_PLAYER; ++channel) {
         processor->zone_mask_remaining[channel] =
@@ -416,7 +472,6 @@ static bool emit_candidate(
 bool taiko_hit_processor_push(taiko_hit_processor_t *processor,
                               const uint16_t samples[TAIKO_CHANNELS_PER_PLAYER],
                               taiko_hit_event_t *event) {
-    update_output_hold(processor);
     for (size_t channel = 0; channel < TAIKO_CHANNELS_PER_PLAYER; ++channel) {
         if (processor->zone_mask_remaining[channel] > 0) {
             processor->zone_mask_remaining[channel]--;
@@ -425,6 +480,9 @@ bool taiko_hit_processor_push(taiko_hit_processor_t *processor,
 
     uint16_t levels[TAIKO_CHANNELS_PER_PLAYER];
     update_baselines_and_levels(processor, samples, levels);
+    // Ordered after the levels so the envelope can track them, and before the
+    // state machine so a fresh emission this scan overrides it.
+    update_output_envelope(processor, levels);
     update_hold_envelopes(processor, levels);
     update_zone_rearm(processor, levels);
 

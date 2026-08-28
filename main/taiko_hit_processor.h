@@ -34,7 +34,17 @@ typedef struct {
     uint8_t capture_samples;
     uint16_t refractory_samples;
     uint8_t rearm_samples;
+    /* How long the struck zone keeps driving its axis after an emission.
+     * This must exceed one of the game's frame periods or the poll can fall
+     * either side of the whole event and drop the note; TaikoArcadeLoader
+     * samples once per presented frame, so 60 fps (16.7 ms) is the case to
+     * clear. */
     uint16_t output_hold_samples;
+    /* Droop applied to the output envelope each scan, coefficient
+     * 1 / 2^output_decay_shift. Shallow enough that the reported force stays
+     * close to the captured peak wherever the poll lands, steep enough that
+     * two consecutive polls never read the same number. */
+    uint8_t output_decay_shift;
     uint8_t minimum_axis;
     /* Crosstalk discrimination. A zone may only trigger while its level
      * dominates every other channel's level (armed or not) by this Q8 ratio,
@@ -108,6 +118,12 @@ typedef struct {
 
     taiko_hit_output_t output;
     uint16_t output_remaining;
+    /* Output envelope: seeded from the captured peak, drooping each scan but
+     * held up by the struck zone's live level, so a drum that is still
+     * ringing feeds the game its own waveform rather than a flat plateau. */
+    uint32_t output_level_q8;
+    uint16_t output_peak_level;
+    uint8_t output_last_axis;
 } taiko_hit_processor_t;
 
 taiko_hit_config_t taiko_hit_config_for_sensitivity(

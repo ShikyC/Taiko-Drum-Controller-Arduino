@@ -9,6 +9,8 @@
 #define HIT_SAMPLE 1600U
 #define TAIL_SAMPLE 420U
 #define SCANS_PER_25_MS 261U
+/* 16.67 ms at 10,416.667 scans/s: one frame of a 60 fps game. */
+#define SCANS_PER_60_HZ_FRAME 174U
 
 static bool push_samples(taiko_hit_processor_t *processor,
                          const uint16_t samples[TAIKO_CHANNELS_PER_PLAYER],
@@ -130,6 +132,46 @@ static void test_tail_does_not_retrigger(const taiko_hit_config_t *config) {
     }
 }
 
+/* The game samples the axis once per presented frame. If the whole event
+ * fits between two of those samples the note is dropped outright, so the
+ * output has to outlast the slowest frame we support -- and it must keep
+ * changing, because a reading identical to the previous one carries no edge
+ * for the game to latch onto. */
+static void test_output_outlasts_a_60hz_frame(const taiko_hit_config_t *config) {
+    taiko_hit_processor_t processor;
+    taiko_hit_processor_init(&processor, config);
+    settle_baseline(&processor);
+    (void)emit_zone(&processor, TAIKO_ZONE_LEFT_DON, TAIKO_ZONE_LEFT_DON);
+
+    taiko_hit_output_t output = taiko_hit_processor_get_output(&processor);
+    assert(output.active);
+    unsigned active_scans = 1;
+    unsigned peak_axis = output.axis_value;
+    unsigned floor_axis = output.axis_value;
+    int previous_axis = output.axis_value;
+
+    for (unsigned scan = 0; scan < SCANS_PER_25_MS; ++scan) {
+        taiko_hit_event_t event;
+        assert(!push_quiet(&processor, &event));
+        output = taiko_hit_processor_get_output(&processor);
+        if (!output.active) {
+            break;
+        }
+        assert(output.axis_value != previous_axis);
+        previous_axis = output.axis_value;
+        if (output.axis_value < floor_axis) {
+            floor_axis = output.axis_value;
+        }
+        assert(output.axis_value <= peak_axis);
+        active_scans++;
+    }
+
+    assert(active_scans >= SCANS_PER_60_HZ_FRAME);
+    /* Wherever the poll lands it must read a force close to the onset, or a
+     * big note decays into a small one depending on frame phase alone. */
+    assert(floor_axis * 4U >= peak_axis * 3U);
+}
+
 int main(void) {
     const taiko_hit_config_t standard = taiko_hit_default_config();
     const taiko_hit_config_t noisy = taiko_hit_long_tail_config();
@@ -142,6 +184,8 @@ int main(void) {
     test_other_zone_ignores_first_zone_tail(&noisy);
     test_tail_does_not_retrigger(&standard);
     test_tail_does_not_retrigger(&noisy);
+    test_output_outlasts_a_60hz_frame(&standard);
+    test_output_outlasts_a_60hz_frame(&noisy);
     puts("taiko_hit_processor rapid-hit tests passed");
     return 0;
 }
